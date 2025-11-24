@@ -6,7 +6,9 @@
 
 #include "Constants.h"
 
-enum struct OrderType { GoodTillCancel, FillAndKill, Market };
+
+// TODO: Add GoodForDay
+enum struct OrderType { GoodTillCancel, FillAndKill, Market, FillOrKill};
 
 class Order {
     public:
