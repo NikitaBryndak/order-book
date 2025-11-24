@@ -1,15 +1,18 @@
-#pragma once
 #include <stdexcept>
 #include <map>
 #include <unordered_map>
 #include <vector>
 #include <optional>
 
-#include "Orderbook.h"
-#include "Constants.h"
-#include "LevelInfo.h"
-#include "Order.h"
-#include "Trade.h"
+#include "order_book/Orderbook.h"
+#include "order_book/Constants.h"
+#include "order_book/LevelInfo.h"
+#include "order_book/Order.h"
+#include "order_book/Trade.h"
+
+Orderbook::Orderbook() = default;
+
+Orderbook::~Orderbook() = default;
 
 Trades Orderbook::AddOrder(OrderPointer order)
 {

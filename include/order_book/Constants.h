@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 using Price = std::int32_t;
 using Quantity = std::uint32_t;
