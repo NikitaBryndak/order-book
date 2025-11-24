@@ -15,6 +15,7 @@ class Trade {
 
         const TradeInfo& GetBidTrade() const { return bidTrade_; }
         const TradeInfo& GetAskTrade() const { return askTrade_; }
+        friend std::ostream& operator<<(std::ostream& os, const Trade& trade);
 
     private:
         TradeInfo askTrade_;

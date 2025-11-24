@@ -220,6 +220,8 @@ Trades Orderbook::MatchOrders()
                 TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity},
                 TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity}});
 
+            std::cout << trades.back() << std::endl;
+
             OnOrderMatched(bid->GetPrice(), quantity, bid->isFilled());
             OnOrderMatched(ask->GetPrice(), quantity, ask->isFilled());
         }
