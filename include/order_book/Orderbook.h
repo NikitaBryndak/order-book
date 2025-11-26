@@ -66,6 +66,6 @@ public:
     void CancelOrder(OrderId orderId);
     Trades ModifyOrder(OrderModify order);
 
-    std::size_t Size() const;
+    std::size_t size() const;
     OrderbookLevelInfos GetOrderInfos() const;
 };

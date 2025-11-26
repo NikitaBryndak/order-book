@@ -186,8 +186,8 @@ Trades Orderbook::MatchOrders()
 
         while (bids.size() && asks.size())
         {
-            auto &bid = bids.front();
-            auto &ask = asks.front();
+            auto& bid = bids.front();
+            auto& ask = asks.front();
 
             Quantity quantity = std::min(bid->GetRemainingQuantity(), ask->GetRemainingQuantity());
 
@@ -206,16 +206,6 @@ Trades Orderbook::MatchOrders()
                 orders_.erase(ask->GetOrderId());
             }
 
-            if (bids.empty())
-            {
-                bids_.erase(bidPrice);
-            }
-
-            if (asks.empty())
-            {
-                asks_.erase(askPrice);
-            }
-
             trades.push_back(Trade{
                 TradeInfo{bid->GetOrderId(), bid->GetPrice(), quantity},
                 TradeInfo{ask->GetOrderId(), ask->GetPrice(), quantity}});
@@ -224,6 +214,16 @@ Trades Orderbook::MatchOrders()
 
             OnOrderMatched(bid->GetPrice(), quantity, bid->isFilled());
             OnOrderMatched(ask->GetPrice(), quantity, ask->isFilled());
+        }
+
+        if (bids.empty())
+        {
+            bids_.erase(bidPrice);
+        }
+
+        if (asks.empty())
+        {
+            asks_.erase(askPrice);
         }
     }
     if (!bids_.empty())
@@ -331,4 +331,4 @@ bool Orderbook::CanFullyFill(Side side, Price price, Quantity quantity) const
     return false;
 }
 
-std::size_t Orderbook::Size() const { return orders_.size(); }
+std::size_t Orderbook::size() const { return orders_.size(); }

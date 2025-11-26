@@ -22,7 +22,7 @@ void Order::ToGoodTillCancel(Price price)
 
 bool Order::isFilled() const
 {
-    return GetRemainingQuantity();
+    return GetRemainingQuantity() == 0;
 }
 
 OrderPointer OrderModify::ToOrderPointer(OrderType type)
