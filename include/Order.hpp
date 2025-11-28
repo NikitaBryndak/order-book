@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <list>
+#include <iostream>
 
 #include "Constants.hpp"
 
@@ -27,8 +28,12 @@ public:
     const bool isFilled() const { return getQuantity() == 0; };
     void Fill(Quantity amount) { remainingQuantity_ -= std::min(remainingQuantity_, amount); };
 
+    // Overloading
+    friend std::ostream &operator<<(std::ostream &out, const Order &order);
+
+
 private:
-    const Price price_; // uint64_t is used to get maximum precision on floating point numbers
+    const Price price_;
     const Quantity initialQuantity_;
     Quantity remainingQuantity_;
     const OrderId orderId_;

@@ -11,6 +11,8 @@ include_directories(include)
 # Define source files
 set(SOURCES
     src/Orderbook.cpp
+    src/Order.cpp
+    main.cpp
 )
 
 # Define header files (optional, for IDE support)

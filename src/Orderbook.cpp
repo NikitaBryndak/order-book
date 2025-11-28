@@ -35,6 +35,9 @@ void Orderbook::matchOrders()
             bids.begin()->Fill(fillQuantity);
             asks.begin()->Fill(fillQuantity);
 
+            std::cout << *bids.begin();
+            std::cout << *asks.begin();
+
             if (bids.begin()->isFilled())
             {
                 bids.pop_front();
