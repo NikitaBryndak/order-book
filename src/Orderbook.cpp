@@ -4,74 +4,122 @@
 
 void Orderbook::matchOrders()
 {
-    // Check if empty -> Can not compare
-    if (bids_.empty() || asks_.empty())
-        return;
-
-    // Get best current prices
-    auto &[bestBidPrice, _] = *bids_.begin();
-    auto &[bestAskPrice, _] = *asks_.begin();
-
-    // Check weather overlap exists
-    if (bestBidPrice < bestAskPrice)
-        return;
-    else
+    while (true)
     {
-        while (true)
+        if (asks_.empty() || bids_.empty())
         {
-            if (asks_.empty() || bids_.empty())
-            {
-                break;
-            }
+            break;
+        }
 
-            auto &[bestBidPrice, bids] = *bids_.begin();
-            auto &[bestAskPrice, asks] = *asks_.begin();
+        cleanLevels();
 
-            if (bestBidPrice < bestAskPrice)
-                break;
+        auto &[bestBidPrice, bids] = *bids_.begin();
+        auto &[bestAskPrice, asks] = *asks_.begin();
 
-            Quantity fillQuantity = std::min(bids.begin()->getQuantity(), asks.begin()->getQuantity());
+        if (bestBidPrice < bestAskPrice)
+            break;
 
-            bids.begin()->Fill(fillQuantity);
-            asks.begin()->Fill(fillQuantity);
 
-            std::cout << *bids.begin();
-            std::cout << *asks.begin();
+        Quantity fillQuantity = std::min(bids.front()->getQuantity(), asks.front()->getQuantity());
 
-            if (bids.begin()->isFilled())
-            {
-                bids.pop_front();
-            }
+        bids.front()->Fill(fillQuantity);
+        asks.front()->Fill(fillQuantity);
 
-            if (asks.begin()->isFilled())
-            {
-                asks.pop_front();
-            }
+        // std::cout << *bids.begin();
+        // std::cout << *asks.begin();
 
-            if (bids.empty())
-            {
-                bids_.erase(bids_.begin());
-            }
+        if (bids.front()->isFilled())
+        {
+            orders_.erase(bids.front()->getOrderId());
+            bids.pop_front();
+            size_--;
+        }
 
-            if (asks.empty())
-            {
-                asks_.erase(asks_.begin());
-            }
+        if (asks.front()->isFilled())
+        {
+            orders_.erase(asks.front()->getOrderId());
+            asks.pop_front();
+            size_--;
+        }
+
+        if (bids.empty())
+        {
+            bids_.erase(bids_.begin());
+        }
+
+        if (asks.empty())
+        {
+            asks_.erase(asks_.begin());
         }
     }
 };
 
 void Orderbook::addOrder(const Order &order)
 {
+    OrderPointer orderPtr = std::make_shared<Order>(order);
+
     if (order.getSide() == Side::Buy)
     {
-        bids_[order.getPrice()].push_back(order);
+        bids_[order.getPrice()].push_back(orderPtr);
     }
     else
     {
-        asks_[order.getPrice()].push_back(order);
+        asks_[order.getPrice()].push_back(orderPtr);
     }
+    orders_[order.getOrderId()] = orderPtr;
+    size_++;
     matchOrders();
 }
 
-size_t Orderbook::size() { return bids_.size() + asks_.size(); }
+void Orderbook::cancelOrder(const OrderId &orderId)
+{
+    if (orders_.count(orderId))
+    {
+        orders_[orderId]->cancel();
+        orders_.erase(orderId);
+        size_--;
+    }
+}
+
+void Orderbook::cleanLevels()
+{
+    // Clean bids
+    {
+        while (!bids_.empty())
+        {
+            if (bids_.begin()->second.empty())
+            {
+                bids_.erase(bids_.begin());
+                continue;
+            }
+
+            if (!bids_.begin()->second.front()->isValid())
+            {
+                bids_.begin()->second.pop_front();
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    // Clean asks
+    {
+        while (!asks_.empty())
+        {
+            if (asks_.begin()->second.empty())
+            {
+                asks_.erase(asks_.begin());
+                continue;
+            }
+
+            if (!asks_.begin()->second.front()->isValid())
+            {
+                asks_.begin()->second.pop_front();
+                continue;
+            }
+
+            break;
+        }
+    }
+}
