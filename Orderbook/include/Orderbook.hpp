@@ -4,7 +4,7 @@
 #include <list>
 #include <functional>
 #include <utility>
-#include <mutex>
+#include <atomic>
 
 #include "Constants.hpp"
 #include "Order.hpp"
@@ -26,6 +26,6 @@ private:
     std::unordered_map<OrderId, OrderPointer> orders_;
 
     mutable std::mutex mutex_;
-    size_t size_{0};
+    std::atomic<size_t> size_{0};
 
 };

@@ -1,52 +1,59 @@
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <chrono> // <--- NEW: For timing
+
 #include "Orderbook.hpp"
 #include "Order.hpp"
-#include "Constants.hpp"
-#include <iostream>
-#include <algorithm> // Needed for std::min (though likely included in Orderbook.cpp)
 
-int main() {
+int main()
+{
     Orderbook orderbook;
+    const int NUM_THREADS = 200;
+    const int ORDERS_PER_THREAD = 10000; // Increased load
 
-    // --- TEST 1: No Cross & Initial Size Check ---
-    std::cout << "--- TEST 1: No Cross ---\n";
-    Order t1_buy(1, 100, 10, Side::Buy);
-    Order t1_sell(2, 101, 5, Side::Sell); // Sell is higher than Buy (no cross)
+    std::vector<std::thread> threads;
+    threads.reserve(NUM_THREADS);
 
-    orderbook.addOrder(t1_buy);
-    orderbook.addOrder(t1_sell);
+    std::cout << "Starting benchmark with " << NUM_THREADS << " threads processing "
+              << (NUM_THREADS * ORDERS_PER_THREAD) << " orders..." << std::endl;
 
-    // Expected: 2 orders (1 Bid, 1 Ask)
-    std::cout << "Size after no cross: " << orderbook.size() << " (Expected: 2)\n";
+    // 1. Start the Timer
+    auto startTime = std::chrono::high_resolution_clock::now();
 
-    // --- TEST 2: Full Fill Match ---
-    std::cout << "\n--- TEST 2: Full Fill Match ---\n";
-    Order t2_aggressor(3, 100, 15, Side::Sell); // Aggressively crosses Best Bid (100)
+    for (int i = 0; i < NUM_THREADS; ++i)
+    {
+        threads.emplace_back([&orderbook, i, ORDERS_PER_THREAD]() {
+            for (int j = 0; j < ORDERS_PER_THREAD; ++j)
+            {
+                OrderId id = (i * ORDERS_PER_THREAD) + j;
+                // Alternate Buy/Sell to trigger matching logic too
+                Side side = (j % 2 == 0) ? Side::Buy : Side::Sell;
+                Order order(id, 100, 10, side);
+                orderbook.addOrder(order);
+            }
+        });
+    }
 
-    orderbook.addOrder(t2_aggressor);
+    for (auto &t : threads)
+    {
+        t.join();
+    }
 
-    // Expected: t1_buy (10 Qty) is completely filled and removed. t2_aggressor (15 Qty) fills 10 and places 5 remaining at 100. t1_sell @ 101 remains.
-    // Book state: 1 Buy @ 101 (t1_sell), 1 Sell @ 100 (t2_aggressor remaining 5).
-    std::cout << "Size after execution: " << orderbook.size() << " (Expected: 2)\n";
+    // 2. Stop the Timer
+    auto endTime = std::chrono::high_resolution_clock::now();
 
-    // --- TEST 3: Partial Fill ---
-    std::cout << "\n--- TEST 3: Partial Fill ---\n";
-    Order t3_partial(4, 101, 2, Side::Buy); // Partially fills t1_sell (now at 3 Qty)
+    // 3. Calculate Duration
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
 
-    orderbook.addOrder(t3_partial);
+    std::cout << "Total Time: " << duration.count() << "ms" << std::endl;
+    std::cout << "Final Size: " << orderbook.size() << std::endl;
 
-    // Expected: t3_partial removes 2 Qty from t1_sell (which had 5 Qty).
-    // t1_sell (Ask @ 101) is partially filled and remaining is 3.
-    // Book state: 1 Sell @ 100 (t2_aggressor), 1 Sell @ 101 (t1_sell remaining 3 Qty). NO MATCH.
-    std::cout << "Size after partial match: " << orderbook.size() << " (Expected: 2)\n";
-
-    // --- TEST 4: O(1) Cancellation Check ---
-    std::cout << "\n--- TEST 4: Cancellation Check ---\n";
-
-    // t1_sell (OrderID 2) is the Sell order placed in Test 1 (with 3 Qty left).
-    orderbook.cancelOrder(2);
-
-    // Expected: Order 2 is removed from the lookup map and marked as invalid. size_ drops by 1.
-    std::cout << "Size after cancellation (ID 2): " << orderbook.size() << " (Expected: 1)\n";
+    // 4. Calculate Orders Per Second
+    if (duration.count() > 0) {
+        unsigned long long ops = (NUM_THREADS * ORDERS_PER_THREAD * 1000) / duration.count();
+        std::cout << "Throughput: " << ops << " orders/second" << std::endl;
+    }
 
     return 0;
 }

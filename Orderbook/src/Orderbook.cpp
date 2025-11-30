@@ -6,12 +6,15 @@ void Orderbook::matchOrders()
 {
     while (true)
     {
-        if (asks_.empty() || bids_.empty())
-        {
-            break;
-        }
+        // if (asks_.empty() || bids_.empty())
+        // {
+        //     break;
+        // }
 
         cleanLevels();
+
+        if (asks_.empty() || bids_.empty())
+            break;
 
         auto &[bestBidPrice, bids] = *bids_.begin();
         auto &[bestAskPrice, asks] = *asks_.begin();
@@ -56,8 +59,9 @@ void Orderbook::matchOrders()
 
 void Orderbook::addOrder(const Order &order)
 {
-    OrderPointer orderPtr = std::make_shared<Order>(order);
     std::lock_guard<std::mutex> guard(mutex_);
+
+    OrderPointer orderPtr = std::make_shared<Order>(order);
 
     if (order.getSide() == Side::Buy)
     {
@@ -75,6 +79,7 @@ void Orderbook::addOrder(const Order &order)
 void Orderbook::cancelOrder(const OrderId &orderId)
 {
     std::lock_guard<std::mutex> guard(mutex_);
+
     if (orders_.count(orderId))
     {
         orders_[orderId]->cancel();
@@ -127,6 +132,5 @@ void Orderbook::cleanLevels()
 }
 
 size_t Orderbook::size() {
-    std::lock_guard<std::mutex> guard(mutex_);
     return size_;
 }
