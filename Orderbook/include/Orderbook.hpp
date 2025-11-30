@@ -4,6 +4,7 @@
 #include <list>
 #include <functional>
 #include <utility>
+#include <mutex>
 
 #include "Constants.hpp"
 #include "Order.hpp"
@@ -14,7 +15,7 @@ public:
     void addOrder(const Order &order);
     void cancelOrder(const OrderId &orderId);
 
-    size_t size() { return size_; }
+    size_t size();
 
 private:
     void matchOrders();
@@ -24,6 +25,7 @@ private:
     std::map<Price, OrderList, std::less<Price>> asks_;
     std::unordered_map<OrderId, OrderPointer> orders_;
 
+    mutable std::mutex mutex_;
     size_t size_{0};
 
 };
