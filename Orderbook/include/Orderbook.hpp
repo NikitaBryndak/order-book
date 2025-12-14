@@ -14,6 +14,7 @@ class Orderbook
 public:
     void addOrder(const Order &order);
     void cancelOrder(const OrderId &orderId);
+    void modifyOrder(const OrderId &orderId, const Order &order);
 
     size_t size();
 

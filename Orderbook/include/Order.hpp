@@ -7,14 +7,21 @@
 
 #include "Constants.hpp"
 
+enum class OrderType
+{
+    FillAndKill,
+    GoodTillCancel,
+};
+
 class Order
 {
 public:
-    Order(const OrderId orderId, const Price price, const Quantity quantity, const Side side) : orderId_(orderId),
-                                                                                                price_(price),
-                                                                                                initialQuantity_(quantity),
-                                                                                                remainingQuantity_(quantity),
-                                                                                                side_(side)
+    Order(const OrderId orderId, OrderType orderType, Price price, const Quantity quantity, const Side side) : orderId_(orderId),
+                                                                                                               orderType_(orderType),
+                                                                                                               price_(price),
+                                                                                                               initialQuantity_(quantity),
+                                                                                                               remainingQuantity_(quantity),
+                                                                                                               side_(side)
     {
     }
 
@@ -24,7 +31,8 @@ public:
     const Quantity getInitialQuantity() const { return initialQuantity_; }
     const Side getSide() const { return side_; }
     const OrderId getOrderId() const { return orderId_; }
-    const bool isValid() const {return valid_; }
+    const bool isValid() const { return valid_; }
+    const OrderType getOrderType() const { return orderType_; }
 
     // Public API
     const bool isFilled() const { return getQuantity() == 0; }
@@ -34,9 +42,9 @@ public:
     // Overloading
     friend std::ostream &operator<<(std::ostream &out, const Order &order);
 
-
 private:
     const Price price_;
+    const OrderType orderType_;
     const Quantity initialQuantity_;
     Quantity remainingQuantity_;
     const OrderId orderId_;

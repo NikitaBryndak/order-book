@@ -6,11 +6,6 @@ void Orderbook::matchOrders()
 {
     while (true)
     {
-        // if (asks_.empty() || bids_.empty())
-        // {
-        //     break;
-        // }
-
         cleanLevels();
 
         if (asks_.empty() || bids_.empty())
@@ -22,14 +17,10 @@ void Orderbook::matchOrders()
         if (bestBidPrice < bestAskPrice)
             break;
 
-
         Quantity fillQuantity = std::min(bids.front()->getQuantity(), asks.front()->getQuantity());
 
         bids.front()->Fill(fillQuantity);
         asks.front()->Fill(fillQuantity);
-
-        // std::cout << *bids.begin();
-        // std::cout << *asks.begin();
 
         if (bids.front()->isFilled())
         {
@@ -71,9 +62,11 @@ void Orderbook::addOrder(const Order &order)
     {
         asks_[order.getPrice()].push_back(orderPtr);
     }
+
     orders_[order.getOrderId()] = orderPtr;
     size_++;
     matchOrders();
+
 }
 
 void Orderbook::cancelOrder(const OrderId &orderId)
@@ -86,6 +79,14 @@ void Orderbook::cancelOrder(const OrderId &orderId)
         orders_.erase(orderId);
         size_--;
     }
+}
+
+void Orderbook::modifyOrder(const OrderId &orderId, const Order &order)
+{
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    this->cancelOrder(orderId);
+    this->addOrder(order);
 }
 
 void Orderbook::cleanLevels()
