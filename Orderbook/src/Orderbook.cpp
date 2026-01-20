@@ -2,48 +2,96 @@
 #include "Order.hpp"
 #include "Constants.hpp"
 
-void Orderbook::matchOrders()
+void Orderbook::matchOrders(OrderPointer newOrder)
 {
-    while (true)
+    if (newOrder->getSide() == Side::Buy)
     {
-        cleanLevels();
-
-        if (asks_.empty() || bids_.empty())
-            break;
-
-        auto &[bestBidPrice, bids] = *bids_.begin();
-        auto &[bestAskPrice, asks] = *asks_.begin();
-
-        if (bestBidPrice < bestAskPrice)
-            break;
-
-        Quantity fillQuantity = std::min(bids.front()->getQuantity(), asks.front()->getQuantity());
-
-        bids.front()->Fill(fillQuantity);
-        asks.front()->Fill(fillQuantity);
-
-        if (bids.front()->isFilled())
+        while (true)
         {
-            orders_.erase(bids.front()->getOrderId());
-            bids.pop_front();
-            size_--;
+            if (asks_.empty() || newOrder->isFilled())
+            {
+                break;
+            }
+
+            auto &[bestAskPrice, asks] = *asks_.begin();
+
+            // Lazy cleanup of cancelled orders
+            if (!asks.front()->isValid())
+            {
+                asks.pop_front();
+                if (asks.empty())
+                {
+                    asks_.erase(asks_.begin());
+                }
+                continue;
+            }
+
+            if (newOrder->getPrice() < bestAskPrice)
+            {
+                break;
+            }
+
+            Quantity fillQuantity = std::min(newOrder->getQuantity(), asks.front()->getQuantity());
+
+            newOrder->Fill(fillQuantity);
+            asks.front()->Fill(fillQuantity);
+
+            if (asks.front()->isFilled())
+            {
+                orders_.erase(asks.front()->getOrderId());
+                asks.pop_front();
+                size_--;
+            }
+
+            if (asks.empty())
+            {
+                asks_.erase(asks_.begin());
+            }
         }
-
-        if (asks.front()->isFilled())
+    }
+    else
+    {
+        while (true)
         {
-            orders_.erase(asks.front()->getOrderId());
-            asks.pop_front();
-            size_--;
-        }
+            if (bids_.empty() || newOrder->isFilled())
+            {
+                break;
+            }
 
-        if (bids.empty())
-        {
-            bids_.erase(bids_.begin());
-        }
+            auto &[bestBidPrice, bids] = *bids_.begin();
 
-        if (asks.empty())
-        {
-            asks_.erase(asks_.begin());
+            // Lazy cleanup of cancelled orders
+            if (!bids.front()->isValid())
+            {
+                bids.pop_front();
+                if (bids.empty())
+                {
+                    bids_.erase(bids_.begin());
+                }
+                continue;
+            }
+
+            if (newOrder->getPrice() > bestBidPrice)
+            {
+                break;
+            }
+
+            Quantity fillQuantity = std::min(newOrder->getQuantity(), bids.front()->getQuantity());
+
+            newOrder->Fill(fillQuantity);
+            bids.front()->Fill(fillQuantity);
+
+            if (bids.front()->isFilled())
+            {
+                orders_.erase(bids.front()->getOrderId());
+                bids.pop_front();
+                size_--;
+            }
+
+            if (bids.empty())
+            {
+                bids_.erase(bids_.begin());
+            }
         }
     }
 };
@@ -54,19 +102,22 @@ void Orderbook::addOrder(const Order &order)
 
     OrderPointer orderPtr = std::make_shared<Order>(order);
 
-    if (order.getSide() == Side::Buy)
-    {
-        bids_[order.getPrice()].push_back(orderPtr);
-    }
-    else
-    {
-        asks_[order.getPrice()].push_back(orderPtr);
-    }
+    matchOrders(orderPtr);
 
-    orders_[order.getOrderId()] = orderPtr;
-    size_++;
-    matchOrders();
+    if (!orderPtr->isFilled() && order.getOrderType() == OrderType::GoodTillCancel)
+    {
+        if (order.getSide() == Side::Buy)
+        {
+            bids_[order.getPrice()].push_back(orderPtr);
+        }
+        else
+        {
+            asks_[order.getPrice()].push_back(orderPtr);
+        }
 
+        orders_[order.getOrderId()] = orderPtr;
+        size_++;
+    }
 }
 
 void Orderbook::cancelOrder(const OrderId &orderId)
@@ -89,49 +140,49 @@ void Orderbook::modifyOrder(const OrderId &orderId, const Order &order)
     this->addOrder(order);
 }
 
-void Orderbook::cleanLevels()
-{
-    // Clean bids
-    {
-        while (!bids_.empty())
-        {
-            if (bids_.begin()->second.empty())
-            {
-                bids_.erase(bids_.begin());
-                continue;
-            }
+/* -------------------------------------------------------------------------- */
+/*                                   LEGACY                                   */
+/* -------------------------------------------------------------------------- */
 
-            if (!bids_.begin()->second.front()->isValid())
-            {
-                bids_.begin()->second.pop_front();
-                continue;
-            }
+// void Orderbook::cleanLevels()
+// {
+//     // Clean bids
+//     {
+//         while (!bids_.empty())
+//         {
+//             if (bids_.begin()->second.empty())
+//             {
+//                 bids_.erase(bids_.begin());
+//                 continue;
+//             }
 
-            break;
-        }
-    }
+//             if (!bids_.begin()->second.front()->isValid())
+//             {
+//                 bids_.begin()->second.pop_front();
+//                 continue;
+//             }
 
-    // Clean asks
-    {
-        while (!asks_.empty())
-        {
-            if (asks_.begin()->second.empty())
-            {
-                asks_.erase(asks_.begin());
-                continue;
-            }
+//             break;
+//         }
+//     }
 
-            if (!asks_.begin()->second.front()->isValid())
-            {
-                asks_.begin()->second.pop_front();
-                continue;
-            }
+//     // Clean asks
+//     {
+//         while (!asks_.empty())
+//         {
+//             if (asks_.begin()->second.empty())
+//             {
+//                 asks_.erase(asks_.begin());
+//                 continue;
+//             }
 
-            break;
-        }
-    }
-}
+//             if (!asks_.begin()->second.front()->isValid())
+//             {
+//                 asks_.begin()->second.pop_front();
+//                 continue;
+//             }
 
-size_t Orderbook::size() {
-    return size_;
-}
+//             break;
+//         }
+//     }
+// }

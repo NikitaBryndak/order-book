@@ -1,7 +1,7 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <chrono> // <--- NEW: For timing
+#include <chrono>
 
 #include "Orderbook.hpp"
 #include "Order.hpp"
@@ -29,7 +29,7 @@ int main()
                 OrderId id = (i * ORDERS_PER_THREAD) + j;
                 // Alternate Buy/Sell to trigger matching logic too
                 Side side = (j % 2 == 0) ? Side::Buy : Side::Sell;
-                Order order(id, 100, 10, side);
+                Order order(id, OrderType::FillAndKill, 100, 10, side);
                 orderbook.addOrder(order);
             }
         });

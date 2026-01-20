@@ -16,11 +16,11 @@ public:
     void cancelOrder(const OrderId &orderId);
     void modifyOrder(const OrderId &orderId, const Order &order);
 
-    size_t size();
+    size_t size() { return size_; };
 
 private:
-    void matchOrders();
-    void cleanLevels();
+    void matchOrders(OrderPointer newOrder);
+    // void cleanLevels();
 
     std::map<Price, OrderList, std::greater<Price>> bids_;
     std::map<Price, OrderList, std::less<Price>> asks_;
@@ -28,5 +28,4 @@ private:
 
     mutable std::mutex mutex_;
     std::atomic<size_t> size_{0};
-
 };
