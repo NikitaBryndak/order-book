@@ -98,8 +98,6 @@ void Orderbook::matchOrders(OrderPointer newOrder)
 
 void Orderbook::addOrder(const Order &order)
 {
-    std::lock_guard<std::mutex> guard(mutex_);
-
     OrderPointer orderPtr = std::make_shared<Order>(order);
 
     matchOrders(orderPtr);
@@ -122,8 +120,6 @@ void Orderbook::addOrder(const Order &order)
 
 void Orderbook::cancelOrder(const OrderId &orderId)
 {
-    std::lock_guard<std::mutex> guard(mutex_);
-
     if (orders_.count(orderId))
     {
         orders_[orderId]->cancel();
@@ -132,57 +128,27 @@ void Orderbook::cancelOrder(const OrderId &orderId)
     }
 }
 
-void Orderbook::modifyOrder(const OrderId &orderId, const Order &order)
+void Orderbook::modifyOrder(const Order &order)
 {
-    std::lock_guard<std::mutex> guard(mutex_);
-
-    this->cancelOrder(orderId);
+    this->cancelOrder(order.getOrderId());
     this->addOrder(order);
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                   LEGACY                                   */
-/* -------------------------------------------------------------------------- */
+void Orderbook::processRequest(const OrderRequest &request)
+{
+    switch (request.type)
+    {
+    case (RequestType::Add):
+        this->addOrder(request.order);
+        break;
 
-// void Orderbook::cleanLevels()
-// {
-//     // Clean bids
-//     {
-//         while (!bids_.empty())
-//         {
-//             if (bids_.begin()->second.empty())
-//             {
-//                 bids_.erase(bids_.begin());
-//                 continue;
-//             }
+    case (RequestType::Cancel):
+        this->cancelOrder(request.order.getOrderId());
+        break;
 
-//             if (!bids_.begin()->second.front()->isValid())
-//             {
-//                 bids_.begin()->second.pop_front();
-//                 continue;
-//             }
+    case (RequestType::Modify):
+        this->modifyOrder(request.order);
+        break;
 
-//             break;
-//         }
-//     }
-
-//     // Clean asks
-//     {
-//         while (!asks_.empty())
-//         {
-//             if (asks_.begin()->second.empty())
-//             {
-//                 asks_.erase(asks_.begin());
-//                 continue;
-//             }
-
-//             if (!asks_.begin()->second.front()->isValid())
-//             {
-//                 asks_.begin()->second.pop_front();
-//                 continue;
-//             }
-
-//             break;
-//         }
-//     }
-// }
+    }
+}

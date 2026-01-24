@@ -9,23 +9,28 @@
 #include "Constants.hpp"
 #include "Order.hpp"
 
+struct OrderRequest
+{
+    RequestType type;
+    Order order;
+};
+
+
 class Orderbook
 {
 public:
-    void addOrder(const Order &order);
-    void cancelOrder(const OrderId &orderId);
-    void modifyOrder(const OrderId &orderId, const Order &order);
-
+    void processRequest(const OrderRequest &request);
     size_t size() { return size_; };
 
 private:
+    void addOrder(const Order &order);
+    void cancelOrder(const OrderId &orderId);
+    void modifyOrder(const Order &order);
     void matchOrders(OrderPointer newOrder);
-    // void cleanLevels();
 
     std::map<Price, OrderList, std::greater<Price>> bids_;
     std::map<Price, OrderList, std::less<Price>> asks_;
     std::unordered_map<OrderId, OrderPointer> orders_;
 
-    mutable std::mutex mutex_;
-    std::atomic<size_t> size_{0};
+    size_t size_{0};
 };

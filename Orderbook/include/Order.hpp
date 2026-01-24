@@ -16,6 +16,8 @@ enum class OrderType
 class Order
 {
 public:
+    Order() : orderId_(0), orderType_(OrderType::GoodTillCancel), price_(0), initialQuantity_(0), remainingQuantity_(0), side_(Side::Buy) {}
+
     Order(const OrderId orderId, OrderType orderType, Price price, const Quantity quantity, const Side side) : orderId_(orderId),
                                                                                                                orderType_(orderType),
                                                                                                                price_(price),
@@ -43,12 +45,12 @@ public:
     friend std::ostream &operator<<(std::ostream &out, const Order &order);
 
 private:
-    const Price price_;
-    const OrderType orderType_;
-    const Quantity initialQuantity_;
+    Price price_;
+    OrderType orderType_;
+    Quantity initialQuantity_;
     Quantity remainingQuantity_;
-    const OrderId orderId_;
-    const Side side_;
+    OrderId orderId_;
+    Side side_;
     bool valid_ = true; // used to mark orders as ghosts for better cache locality
 };
 

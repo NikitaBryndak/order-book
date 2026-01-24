@@ -6,3 +6,10 @@ using Quantity = uint64_t;
 using OrderId = uint64_t;
 
 enum struct Side { Buy, Sell };
+
+enum RequestType
+{
+    Add,
+    Cancel,
+    Modify
+};
