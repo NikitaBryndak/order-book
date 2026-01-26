@@ -1,305 +1,418 @@
 #include <gtest/gtest.h>
+
 #include <chrono>
+#include <condition_variable>
+#include <limits>
+#include <mutex>
+#include <random>
 #include <thread>
 #include <vector>
-#include <random>
-#include <iostream>
-#include "Orderbook.hpp"
+
 #include "Order.hpp"
+#include "Orderbook.hpp"
+#include "RingBuffer.hpp" // <--- CHANGED
 
-TEST(OrderBookTests, SanityCheck) {
-    EXPECT_EQ(1 + 1, 2);
-}
-
-TEST(OrderBookTests, OrderBookEmptyByDefault) {
+class OrderBookTest : public ::testing::Test
+{
+protected:
     Orderbook ob;
-    EXPECT_EQ(ob.size(), 0);
-}
+    // Capacity 2^20 (~1 Million) to avoid blocking producers during benchmarks
+    RingBuffer<OrderRequest> queue{1048576};
+    std::thread consumerThread;
 
-TEST(OrderBookTests, AddOrder) {
-    Orderbook ob;
-    Order order(1, OrderType::GoodTillCancel, 100, 10, Side::Buy);
-    ob.addOrder(order);
+    // Sync mechanisms
+    std::mutex syncMutex;
+    std::condition_variable syncCv;
+    bool syncDone = false;
+
+    const OrderId STOP_ID = std::numeric_limits<OrderId>::max();
+    const OrderId SYNC_ID = std::numeric_limits<OrderId>::max() - 1;
+
+    void SetUp() override
+    {
+        consumerThread = std::thread(
+            [this]()
+            {
+                while (true)
+                {
+                    // This now SPINS (burns 100% CPU) waiting for data
+                    // This eliminates the "Spikiness" of OS context switches
+                    OrderRequest req = queue.pop();
+
+                    OrderId id = req.order.getOrderId();
+                    if (id == STOP_ID)
+                        break;
+
+                    if (id == SYNC_ID)
+                    {
+                        {
+                            std::lock_guard<std::mutex> lock(syncMutex);
+                            syncDone = true;
+                        }
+                        syncCv.notify_all();
+                        continue;
+                    }
+                    ob.processRequest(req);
+                }
+            });
+    }
+
+    void TearDown() override
+    {
+        // Send stop signal
+        Order stopOrder(STOP_ID, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+        OrderRequest req;
+        req.type = RequestType::Add; // Type doesn't matter for logic flow here, just ID
+        req.order = stopOrder;
+
+        queue.push(std::move(req));
+
+        if (consumerThread.joinable())
+        {
+            consumerThread.join();
+        }
+    }
+
+    // Waits until the Consumer has processed everything currently in the queue
+    void Sync()
+    {
+        {
+            std::lock_guard<std::mutex> lock(syncMutex);
+            syncDone = false;
+        }
+
+        Order syncOrder(SYNC_ID, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+        OrderRequest req;
+        req.type = RequestType::Add;
+        req.order = syncOrder;
+
+        queue.push(std::move(req));
+
+        std::unique_lock<std::mutex> lock(syncMutex);
+        syncCv.wait(lock, [this]() { return syncDone; });
+    }
+
+    // --- Helpers for Functional Tests (Synchronous) ---
+    // These calls wait for the engine, so they are slow but safe for assertions.
+
+    void Add(OrderId id, OrderType type, Price price, Quantity qty, Side side)
+    {
+        OrderRequest req;
+        req.type = RequestType::Add;
+        req.order = Order(id, type, price, qty, side);
+        queue.push(std::move(req));
+        Sync();
+    }
+
+    void AddBuy(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
+    {
+        Add(id, type, price, qty, Side::Buy);
+    }
+
+    void AddSell(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
+    {
+        Add(id, type, price, qty, Side::Sell);
+    }
+
+    void Cancel(OrderId id)
+    {
+        OrderRequest req;
+        req.type = RequestType::Cancel;
+        // Dummy order object just to carry the ID
+        req.order = Order(id, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+        queue.push(std::move(req));
+        Sync();
+    }
+
+    void Modify(OrderId id, OrderType type, Price price, Quantity qty, Side side)
+    {
+        OrderRequest req;
+        req.type = RequestType::Modify;
+        req.order = Order(id, type, price, qty, side);
+        queue.push(std::move(req));
+        Sync();
+    }
+};
+
+// ==========================================
+// 1. FUNCTIONAL CORRECTNESS TESTS
+// ==========================================
+
+TEST_F(OrderBookTest, InitialStateIsEmpty) { EXPECT_EQ(ob.size(), 0); }
+
+TEST_F(OrderBookTest, AddOrderValidation)
+{
+    AddBuy(1, 100, 10);
     EXPECT_EQ(ob.size(), 1);
-}
 
-TEST(OrderBookTests, CancelOrder) {
-    Orderbook ob;
-    Order order(1, OrderType::GoodTillCancel, 100, 10, Side::Buy);
-    ob.addOrder(order);
-    EXPECT_EQ(ob.size(), 1);
-
-    ob.cancelOrder(1);
-    EXPECT_EQ(ob.size(), 0);
-}
-
-TEST(OrderBookTests, MatchFullFill) {
-    Orderbook ob;
-    // Sell 10 units at price 100
-    Order sellOrder(1, OrderType::GoodTillCancel, 100, 10, Side::Sell);
-    ob.addOrder(sellOrder);
-
-    // Buy 10 units at price 100
-    Order buyOrder(2, OrderType::GoodTillCancel, 100, 10, Side::Buy);
-    ob.addOrder(buyOrder);
-
-    // Both should be filled and removed
-    EXPECT_EQ(ob.size(), 0);
-}
-
-TEST(OrderBookTests, MatchPartialFillBuyRemainder) {
-    Orderbook ob;
-    // Sell 5 units at price 100
-    Order sellOrder(1, OrderType::GoodTillCancel, 100, 5, Side::Sell);
-    ob.addOrder(sellOrder);
-
-    // Buy 10 units at price 100
-    Order buyOrder(2, OrderType::GoodTillCancel, 100, 10, Side::Buy);
-    ob.addOrder(buyOrder);
-
-    // Sell order filled and removed. Buy order partially filled but remains.
-    EXPECT_EQ(ob.size(), 1);
-}
-
-TEST(OrderBookTests, MatchPartialFillSellRemainder) {
-    Orderbook ob;
-    // Sell 10 units at price 100
-    Order sellOrder(1, OrderType::GoodTillCancel, 100, 10, Side::Sell);
-    ob.addOrder(sellOrder);
-
-    // Buy 5 units at price 100
-    Order buyOrder(2, OrderType::GoodTillCancel, 100, 5, Side::Buy);
-    ob.addOrder(buyOrder);
-
-    // Buy order filled and removed. Sell order partially filled but remains.
-    EXPECT_EQ(ob.size(), 1);
-}
-
-TEST(OrderBookTests, NoMatch) {
-    Orderbook ob;
-    // Sell at 101
-    Order sellOrder(1, OrderType::GoodTillCancel, 101, 10, Side::Sell);
-    ob.addOrder(sellOrder);
-
-    // Buy at 99
-    Order buyOrder(2, OrderType::GoodTillCancel, 99, 10, Side::Buy);
-    ob.addOrder(buyOrder);
-
-    // No match, both remain
+    AddSell(2, 110, 5);
     EXPECT_EQ(ob.size(), 2);
 }
 
-TEST(OrderBookTests, MatchMultipleOrders) {
-    Orderbook ob;
-    // Sell 10 @ 100
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 10, Side::Sell));
-    // Sell 10 @ 100
-    ob.addOrder(Order(2, OrderType::GoodTillCancel, 100, 10, Side::Sell));
+TEST_F(OrderBookTest, CancelOrderValidation)
+{
+    AddBuy(1, 100, 10);
+    EXPECT_EQ(ob.size(), 1);
 
-    // Buy 15 @ 100 (Should fill first sell completely, second sell partially)
-    ob.addOrder(Order(3, OrderType::GoodTillCancel, 100, 15, Side::Buy));
-
-    EXPECT_EQ(ob.size(), 1); // Only the second sell order remains (with 5 units)
-}
-
-TEST(OrderBookTests, CancelOrderAtTop) {
-    Orderbook ob;
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 10, Side::Buy));
-    ob.addOrder(Order(2, OrderType::GoodTillCancel, 100, 10, Side::Buy));
-
-    ob.cancelOrder(1);
-
-    // Sell 10 @ 100
-    ob.addOrder(Order(3, OrderType::GoodTillCancel, 100, 10, Side::Sell));
-
-    // Should match Order 2. Order 1 was cancelled.
-    // If Order 1 was matched, Order 2 would remain.
-    // If Order 2 was matched, Orderbook should be empty (Order 1 cancelled, Order 2 filled, Order 3 filled).
-
+    Cancel(1);
     EXPECT_EQ(ob.size(), 0);
 }
 
-TEST(OrderBookTests, MatchWithCancelledOrderInBetween) {
-    Orderbook ob;
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 10, Side::Buy));
-    ob.addOrder(Order(2, OrderType::GoodTillCancel, 100, 10, Side::Buy));
-    ob.addOrder(Order(3, OrderType::GoodTillCancel, 100, 10, Side::Buy));
+TEST_F(OrderBookTest, CancelNonExistentOrder)
+{
+    Cancel(999);
+    EXPECT_EQ(ob.size(), 0);
 
-    ob.cancelOrder(2);
-
-    // Sell 30 @ 100.
-    // Should fill Order 1 (10), skip Order 2, fill Order 3 (10).
-    // Sell order has 10 remaining.
-    ob.addOrder(Order(4, OrderType::GoodTillCancel, 100, 30, Side::Sell));
-
+    AddBuy(1, 100, 10);
+    Cancel(999);
     EXPECT_EQ(ob.size(), 1);
 }
 
-// Tests for OrderType::FillAndKill
+TEST_F(OrderBookTest, FullMatchExecution)
+{
+    // Resting sell order
+    AddSell(1, 100, 10);
 
-TEST(OrderBookTests, FillAndKill_NoMatch) {
-    Orderbook ob;
-    // Try to buy 10 @ 100, but book is empty
-    ob.addOrder(Order(1, OrderType::FillAndKill, 100, 10, Side::Buy));
+    // Aggressive buy order matches completely
+    AddBuy(2, 100, 10);
 
-    // Order should not be added to the book
     EXPECT_EQ(ob.size(), 0);
 }
 
-TEST(OrderBookTests, FillAndKill_FullMatch) {
-    Orderbook ob;
-    // Sell 10 @ 100
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 10, Side::Sell));
+TEST_F(OrderBookTest, PartialMatch_RestingRemains)
+{
+    // Provide 10 liquidity
+    AddSell(1, 100, 10);
 
-    // Buy 10 @ 100 (FillAndKill)
-    ob.addOrder(Order(2, OrderType::FillAndKill, 100, 10, Side::Buy));
+    // Consume 5 liquidity
+    AddBuy(2, 100, 5);
 
-    // Both should be gone
-    EXPECT_EQ(ob.size(), 0);
-}
-
-TEST(OrderBookTests, FillAndKill_PartialFill_RemainderKilled) {
-    Orderbook ob;
-    // Sell 5 @ 100
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 5, Side::Sell));
-
-    // Buy 10 @ 100 (FillAndKill)
-    // Should fill 5, then kill the remaining 5
-    ob.addOrder(Order(2, OrderType::FillAndKill, 100, 10, Side::Buy));
-
-    // Sell order filled and removed. Buy order remainder killed.
-    EXPECT_EQ(ob.size(), 0);
-}
-
-TEST(OrderBookTests, FillAndKill_DoesNotMatchWorsePrice) {
-    Orderbook ob;
-    // Sell 10 @ 105
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 105, 10, Side::Sell));
-
-    // Buy 10 @ 100 (FillAndKill)
-    // Price mismatch, no fill.
-    ob.addOrder(Order(2, OrderType::FillAndKill, 100, 10, Side::Buy));
-
-    // Sell order remains. Buy order killed.
-    EXPECT_EQ(ob.size(), 1);
-}
-
-TEST(OrderBookTests, FillAndKill_PartialFill_OrderBookUpdates) {
-    Orderbook ob;
-    // Sell 10 @ 100
-    ob.addOrder(Order(1, OrderType::GoodTillCancel, 100, 10, Side::Sell));
-    // Sell 10 @ 101
-    ob.addOrder(Order(2, OrderType::GoodTillCancel, 101, 10, Side::Sell));
-
-    // Buy 15 @ 101 (FillAndKill)
-    // Should match best price first: 10 @ 100.
-    // Then match remaining 5 against: 10 @ 101.
-    // Result: Order 1 filled/removed. Order 2 partial fill (5 remaining). Order 3 fully filled.
-    ob.addOrder(Order(3, OrderType::FillAndKill, 101, 15, Side::Buy));
-
+    // Sell order should remain with 5 qty
     EXPECT_EQ(ob.size(), 1);
 
-    // Verify by clearing the remaining 5 of order 2
-    ob.addOrder(Order(4, OrderType::FillAndKill, 101, 5, Side::Buy));
+    // Clear the rest
+    AddBuy(3, 100, 5);
     EXPECT_EQ(ob.size(), 0);
 }
 
+TEST_F(OrderBookTest, PartialMatch_AggressiveRemains)
+{
+    // Provide 5 liquidity
+    AddSell(1, 100, 5);
 
-TEST(OrderBookTests, PerformanceTest_SingleThread) {
-    Orderbook ob;
-    const int numOrders = 100000;
+    // Try to consume 10. 5 Matched, 5 remaining placed in book.
+    AddBuy(2, 100, 10);
 
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < numOrders; ++i) {
-        Side side = (i % 2 == 0) ? Side::Buy : Side::Sell;
-        Price price = 100 + (i % 10); // Prices around 100
-        ob.addOrder(Order(i, OrderType::GoodTillCancel, price, 10, side));
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    double ops = numOrders / elapsed.count();
-    std::cout << "Single Thread Performance: " << ops << " OPS" << std::endl;
+    EXPECT_EQ(ob.size(), 1); // Order 2 remains
 }
 
-TEST(OrderBookTests, PerformanceTest_MultiThread) {
-    Orderbook ob;
-    const int numOrders = 100000;
-    const int numThreads = 4;
-    std::vector<std::thread> threads;
+TEST_F(OrderBookTest, PriceImprovement_BuyMatchesLowerSell)
+{
+    // Seller willing to sell at 90
+    AddSell(1, 90, 10);
 
-    auto start = std::chrono::high_resolution_clock::now();
+    // Buyer willing to buy at 100. Should match at 90.
+    AddBuy(2, 100, 10);
 
-    for (int t = 0; t < numThreads; ++t) {
-        threads.emplace_back([&ob, t, numThreads, numOrders]() {
-            int ordersPerThread = numOrders / numThreads;
-            int startId = t * ordersPerThread;
-            for (int i = 0; i < ordersPerThread; ++i) {
-                int id = startId + i;
-                Side side = (id % 2 == 0) ? Side::Buy : Side::Sell;
-                Price price = 100 + (id % 10);
-                ob.addOrder(Order(id, OrderType::GoodTillCancel, price, 10, side));
-            }
-        });
-    }
-
-    for (auto& thread : threads) {
-        thread.join();
-    }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    double ops = numOrders / elapsed.count();
-    std::cout << "Multi Thread (" << numThreads << " threads) Performance: " << ops << " OPS" << std::endl;
+    EXPECT_EQ(ob.size(), 0);
 }
 
-TEST(OrderBookTests, Benchmark_DeepBook) {
-    Orderbook orderbook;
-    const int PRE_FILL_COUNT = 50000;
-    const int TRADE_COUNT = 20000; // Number of orders to execute against the deep book
+TEST_F(OrderBookTest, ModifyOrder)
+{
+    AddBuy(1, 100, 10);
+    Modify(1, OrderType::GoodTillCancel, 105, 10, Side::Buy);
 
-    std::cout << "1. Pre-filling order book with " << (PRE_FILL_COUNT * 2) << " resting orders..." << std::endl;
+    // Verification: It should now match a sell at 105
+    AddSell(2, 105, 10);
+    EXPECT_EQ(ob.size(), 0);
+}
 
-    // Fill Asks (Sells) at high prices (1000+)
-    for(int i = 0; i < PRE_FILL_COUNT; i++) {
-        orderbook.addOrder(Order(i, OrderType::GoodTillCancel, 1000 + (i % 500), 10, Side::Sell));
-    }
+// --- OrderType::FillAndKill Tests ---
 
-    // Fill Bids (Buys) at low prices (0-500)
-    for(int i = 0; i < PRE_FILL_COUNT; i++) {
-        orderbook.addOrder(Order(i + PRE_FILL_COUNT, OrderType::GoodTillCancel, 100 + (i % 400), 10, Side::Buy));
-    }
+TEST_F(OrderBookTest, FillAndKill_NoLiquidity)
+{
+    AddBuy(1, 100, 10, OrderType::FillAndKill);
+    EXPECT_EQ(ob.size(), 0); // Should be killed immediately
+}
 
-    std::cout << "   Current Book Size: " << orderbook.size() << " (Spread exists, no matches yet)" << std::endl;
+TEST_F(OrderBookTest, FillAndKill_PriceMismatch)
+{
+    AddSell(1, 110, 10);
+    AddBuy(2, 100, 10, OrderType::FillAndKill);
+    EXPECT_EQ(ob.size(), 1); // Sell remains, Buy killed
+}
 
-    std::cout << "2. Benchmarking matching against deep book..." << std::endl;
+TEST_F(OrderBookTest, FillAndKill_PartialFill_KillRemainder)
+{
+    AddSell(1, 100, 5);
+
+    // Wants 10, gets 5, remaining 5 killed
+    AddBuy(2, 100, 10, OrderType::FillAndKill);
+
+    EXPECT_EQ(ob.size(), 0);
+}
+
+// --- Lazy Deletion / Ghost Order Tests ---
+
+TEST_F(OrderBookTest, LazyCleanup_TopLevelCancel)
+{
+    AddSell(1, 100, 10);
+    AddSell(2, 100, 10);
+
+    Cancel(1);
+    EXPECT_EQ(ob.size(), 1);
+
+    // Incoming buy should traverse the "ghost" of Order 1 and match Order 2
+    AddBuy(3, 100, 10);
+    EXPECT_EQ(ob.size(), 0);
+}
+
+// ==========================================
+// 2. HIGH PERFORMANCE BENCHMARKS
+// ==========================================
+// Note: These tests bypass the 'Add' helper to avoid Sync() overhead per order.
+
+TEST_F(OrderBookTest, Benchmark_OrderInsertion)
+{
+    const int numOrders = 100000000;
+    std::cout << "Starting Insertion Benchmark (" << numOrders << " orders)...\n";
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    // Execute Buy orders that will match the waiting Sells (crossing the spread)
-    // We buy at 2000, which guarantees a match against the Sells at 1000+
-    for(int i = 0; i < TRADE_COUNT; i++) {
-        // ID must be unique to avoid collisions in your logic if checking distinct IDs
-        orderbook.addOrder(Order(1000000 + i, OrderType::FillAndKill, 2000, 10, Side::Buy));
+    for (int i = 0; i < numOrders; ++i)
+    {
+        OrderRequest req;
+        req.type = RequestType::Add;
+        req.order = Order(i, OrderType::GoodTillCancel, 100 - (i % 10), 10, Side::Buy);
+        queue.push(std::move(req));
     }
 
+    // Wait for engine to catch up at the END
+    Sync();
+
     auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
+    std::chrono::duration<double> diff = end - start;
 
-    double ops = TRADE_COUNT / elapsed.count();
-    double latencyUs = (elapsed.count() / TRADE_COUNT) * 1000000.0;
+    std::cout << "Inserted " << numOrders << " orders in " << diff.count() << " s\n";
+    std::cout << "Throughput: " << (long long)(numOrders / diff.count()) << " ops/sec\n";
+    std::cout << "Average Latency: " << (diff.count() / numOrders) * 1e6 << " us/order\n";
+}
 
-    std::cout << "=========================================" << std::endl;
-    std::cout << "Deep Book Performance Results:" << std::endl;
-    std::cout << "Orders Executed: " << TRADE_COUNT << std::endl;
-    std::cout << "Total Time:      " << elapsed.count() << " s" << std::endl;
-    std::cout << "Throughput:      " << ops << " OPS" << std::endl;
-    std::cout << "Latency/Order:   " << latencyUs << " microseconds" << std::endl;
-    std::cout << "=========================================" << std::endl;
+TEST_F(OrderBookTest, Benchmark_OrderMatching)
+{
+    const int numOrders = 50000000; // 500k Buys + 500k Sells = 1M Ops
 
-    // Sanity check: Size should have decreased by number of trades (since sells were removed)
-    EXPECT_LT(orderbook.size(), (PRE_FILL_COUNT * 2));
+    // 1. Pre-fill Sells (Async)
+    for (int i = 0; i < numOrders; ++i)
+    {
+        OrderRequest req;
+        req.type = RequestType::Add;
+        req.order = Order(i, OrderType::GoodTillCancel, 100, 10, Side::Sell);
+        queue.push(std::move(req));
+    }
+    Sync(); // Ensure book is full
+
+    std::cout << "Starting Matching Benchmark (" << numOrders << " matches)...\n";
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // 2. Fire Aggressive Buys (Async)
+    for (int i = 0; i < numOrders; ++i)
+    {
+        OrderRequest req;
+        req.type = RequestType::Add;
+        req.order = Order(numOrders + i, OrderType::GoodTillCancel, 100, 10, Side::Buy);
+        queue.push(std::move(req));
+    }
+
+    Sync(); // Wait for completion
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+
+    std::cout << "Matched " << numOrders << " orders in " << diff.count() << " s\n";
+    std::cout << "Throughput: " << (long long)(numOrders / diff.count()) << " matches/sec\n";
+}
+
+TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
+{
+    const int numThreads = 19;
+    const int numOps = 100000000;
+    const int opsPerThread = numOps / numThreads;
+
+    std::cout << "Starting Real-World Multi-Threaded Benchmark (" << numThreads << " producers, " << numOps
+              << " total ops)...\n";
+    auto start = std::chrono::high_resolution_clock::now();
+
+    std::vector<std::thread> producers;
+    producers.reserve(numThreads);
+
+    for (int t = 0; t < numThreads; ++t)
+    {
+        producers.emplace_back(
+            [this, t, opsPerThread]()
+            {
+                std::mt19937 gen(12345 + t);
+                std::uniform_int_distribution<> actionDist(1, 100);
+                std::uniform_int_distribution<> qtyDist(1, 100);
+                std::uniform_int_distribution<> sideDist(0, 1);
+
+                std::vector<OrderId> localActiveOrderIds;
+                localActiveOrderIds.reserve(opsPerThread / 2);
+
+                // Partition Order IDs to avoid collision
+                OrderId nextOrderId = (OrderId)t * (OrderId)opsPerThread * 2 + 1;
+
+                for (int i = 0; i < opsPerThread; ++i)
+                {
+                    int action = actionDist(gen);
+
+                    if (action <= 50)
+                    { // 50% Add Passive
+                        Side s = sideDist(gen) == 0 ? Side::Buy : Side::Sell;
+                        Price p = (s == Side::Buy) ? 99 : 101;
+
+                        OrderRequest req;
+                        req.type = RequestType::Add;
+                        req.order = Order(nextOrderId, OrderType::GoodTillCancel, p, qtyDist(gen), s);
+                        queue.push(std::move(req));
+
+                        localActiveOrderIds.push_back(nextOrderId++);
+                    }
+                    else if (action <= 70 && !localActiveOrderIds.empty())
+                    { // 20% Cancel
+                        OrderId idToCancel = localActiveOrderIds.back();
+                        localActiveOrderIds.pop_back();
+
+                        OrderRequest req;
+                        req.type = RequestType::Cancel;
+                        req.order = Order(idToCancel, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+                        queue.push(std::move(req));
+                    }
+                    else
+                    { // 30% Aggressive
+                        Side s = sideDist(gen) == 0 ? Side::Buy : Side::Sell;
+                        Price p = (s == Side::Buy) ? 102 : 98;
+
+                        OrderRequest req;
+                        req.type = RequestType::Add;
+                        req.order = Order(nextOrderId++, OrderType::GoodTillCancel, p, qtyDist(gen), s);
+                        queue.push(std::move(req));
+                    }
+                }
+            });
+    }
+
+    for (auto& t : producers)
+    {
+        if (t.joinable())
+            t.join();
+    }
+
+    Sync(); // Wait for consumer to drain
+
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+
+    std::cout << "Processed " << (opsPerThread * numThreads) << " ops in " << diff.count() << " s\n";
+    std::cout << "Throughput: " << (long long)((opsPerThread * numThreads) / diff.count()) << " ops/sec\n";
 }

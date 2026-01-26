@@ -33,8 +33,8 @@ public:
     const Quantity getInitialQuantity() const { return initialQuantity_; }
     const Side getSide() const { return side_; }
     const OrderId getOrderId() const { return orderId_; }
-    const bool isValid() const { return valid_; }
     const OrderType getOrderType() const { return orderType_; }
+    const bool isValid() const { return valid_; }
 
     // Public API
     const bool isFilled() const { return getQuantity() == 0; }

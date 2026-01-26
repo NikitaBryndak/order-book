@@ -1,59 +1,81 @@
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <thread>
 #include <vector>
-#include <chrono>
 
-#include "Orderbook.hpp"
+#include "Constants.hpp"
 #include "Order.hpp"
+#include "OrderQueue.hpp"
+#include "Orderbook.hpp"
 
-int main()
-{
-    Orderbook orderbook;
-    const int NUM_THREADS = 200;
-    const int ORDERS_PER_THREAD = 10000; // Increased load
+// 1. The Queue lives here (Shared between threads)
+OrderQueue<OrderRequest> globalQueue;
 
-    std::vector<std::thread> threads;
-    threads.reserve(NUM_THREADS);
+// 2. The Producer (Simulates a Gateway)
+void gatewayThread(int id) {
+  for (int i = 0; i < 100; ++i) {
+    // Construct Order with correct arguments:
+    // OrderId, OrderType, Price, Quantity, Side
+    OrderId orderId = static_cast<OrderId>(id * 1000 + i);
+    Order order(orderId, OrderType::GoodTillCancel, 100, 10, Side::Buy);
 
-    std::cout << "Starting benchmark with " << NUM_THREADS << " threads processing "
-              << (NUM_THREADS * ORDERS_PER_THREAD) << " orders..." << std::endl;
+    OrderRequest req{RequestType::Add, std::move(order)};
 
-    // 1. Start the Timer
-    auto startTime = std::chrono::high_resolution_clock::now();
+    // Pushes to the queue (Thread Safe!)
+    globalQueue.push(std::move(req));
+  }
+}
 
-    for (int i = 0; i < NUM_THREADS; ++i)
-    {
-        threads.emplace_back([&orderbook, i, ORDERS_PER_THREAD]() {
-            for (int j = 0; j < ORDERS_PER_THREAD; ++j)
-            {
-                OrderId id = (i * ORDERS_PER_THREAD) + j;
-                // Alternate Buy/Sell to trigger matching logic too
-                Side side = (j % 2 == 0) ? Side::Buy : Side::Sell;
-                Order order(id, OrderType::FillAndKill, 100, 10, side);
-                orderbook.addOrder(order);
-            }
-        });
+// 3. The Consumer (The Engine)
+void engineThread(Orderbook& book) {
+  while (true) {
+    // Pops from queue (Waits if empty)
+    OrderRequest req = globalQueue.pop();
+
+    // Check for termination signal
+    if (req.order.getOrderId() == std::numeric_limits<OrderId>::max()) {
+      std::cout << "Engine thread received stop signal. Stopping." << std::endl;
+      break;
     }
 
-    for (auto &t : threads)
-    {
-        t.join();
-    }
+    // Processes into the book (No locks needed here!)
+    book.processRequest(req);
+  }
+}
 
-    // 2. Stop the Timer
-    auto endTime = std::chrono::high_resolution_clock::now();
+int main() {
+  Orderbook book;
 
-    // 3. Calculate Duration
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+  std::cout << "Starting Orderbook Engine..." << std::endl;
 
-    std::cout << "Total Time: " << duration.count() << "ms" << std::endl;
-    std::cout << "Final Size: " << orderbook.size() << std::endl;
+  // Start the Engine (Consumer)
+  std::thread consumer(engineThread, std::ref(book));
 
-    // 4. Calculate Orders Per Second
-    if (duration.count() > 0) {
-        unsigned long long ops = (NUM_THREADS * ORDERS_PER_THREAD * 1000) / duration.count();
-        std::cout << "Throughput: " << ops << " orders/second" << std::endl;
-    }
+  // Start Gateways (Producers)
+  std::vector<std::thread> producers;
+  for (int i = 0; i < 5; i++) {
+    producers.emplace_back(gatewayThread, i);
+  }
 
-    return 0;
+  // Join producers (wait for them to finish sending orders)
+  for (auto& p : producers) {
+    if (p.joinable()) p.join();
+  }
+
+  std::cout << "All producers finished." << std::endl;
+
+  // Send poison pill to stop the consumer
+  // Use MAX OrderId to signal stop
+  Order stopOrder(std::numeric_limits<OrderId>::max(),
+                  OrderType::GoodTillCancel, 0, 0, Side::Buy);
+  OrderRequest stopReq{RequestType::Add, std::move(stopOrder)};
+  globalQueue.push(std::move(stopReq));
+
+  // Join consumer
+  if (consumer.joinable()) consumer.join();
+
+  std::cout << "Final Orderbook Size: " << book.size() << std::endl;
+
+  return 0;
 }
