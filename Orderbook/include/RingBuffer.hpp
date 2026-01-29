@@ -4,6 +4,7 @@
 #include <thread>
 #include <utility>
 #include <stdexcept>
+#include <memory>
 
 template <typename T>
 class RingBuffer
@@ -15,7 +16,7 @@ private:
         T data;
     };
 
-    std::vector<Slot> buffer_;
+    std::unique_ptr<Slot[]> buffer_;
 
     // BITMASK
     const size_t capacity_;
@@ -32,14 +33,7 @@ public:
         {
             throw std::runtime_error("RingBuffer capacity must be power of 2");
         }
-
-        buffer_.resize(capacity);
-
-        for (auto& slot : buffer_)
-        {
-            slot.written.store(false, std::memory_order_relaxed);
-        }
-
+        buffer_ = std::make_unique<Slot[]>(capacity);
     }
 
     void push(T&& item)

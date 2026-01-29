@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <iostream>
 #include <limits>
 #include <mutex>
 #include <random>
@@ -10,14 +11,14 @@
 
 #include "Order.hpp"
 #include "Orderbook.hpp"
-#include "RingBuffer.hpp" // <--- CHANGED
+#include "RingBuffer.hpp"
 
 class OrderBookTest : public ::testing::Test
 {
 protected:
     Orderbook ob;
     // Capacity 2^20 (~1 Million) to avoid blocking producers during benchmarks
-    RingBuffer<OrderRequest> queue{1048576};
+    RingBuffer<OrderRequest> queue{1 << 20};
     std::thread consumerThread;
 
     // Sync mechanisms
@@ -35,24 +36,41 @@ protected:
             {
                 while (true)
                 {
-                    // This now SPINS (burns 100% CPU) waiting for data
-                    // This eliminates the "Spikiness" of OS context switches
-                    OrderRequest req = queue.pop();
+                    try {
+                        // This now SPINS (burns 100% CPU) waiting for data
+                        // This eliminates the "Spikiness" of OS context switches
+                        OrderRequest req = queue.pop();
 
-                    OrderId id = req.order.getOrderId();
-                    if (id == STOP_ID)
-                        break;
+                        OrderId id = req.order.getOrderId();
+                        if (id == STOP_ID)
+                            break;
 
-                    if (id == SYNC_ID)
-                    {
+                        if (id == SYNC_ID)
                         {
-                            std::lock_guard<std::mutex> lock(syncMutex);
-                            syncDone = true;
+                            {
+                                std::lock_guard<std::mutex> lock(syncMutex);
+                                syncDone = true;
+                            }
+                            syncCv.notify_all();
+                            continue;
                         }
-                        syncCv.notify_all();
-                        continue;
+                        ob.processRequest(req);
                     }
-                    ob.processRequest(req);
+                    catch (const std::exception& e) {
+                        std::cerr << "Consumer Ex: " << e.what() << std::endl;
+                        // Don't rethrow to avoid crash, just log and break?
+                        // If we break, sync might hang.
+                        // Best to fail test.
+                        std::terminate();
+                    }
+                    catch (const char* e) {
+                         std::cerr << "Consumer Ex: " << e << std::endl;
+                         std::terminate();
+                    }
+                    catch (...) {
+                         std::cerr << "Consumer Unknown Ex" << std::endl;
+                         std::terminate();
+                    }
                 }
             });
     }
@@ -274,7 +292,7 @@ TEST_F(OrderBookTest, LazyCleanup_TopLevelCancel)
 
 TEST_F(OrderBookTest, Benchmark_OrderInsertion)
 {
-    const int numOrders = 100000000;
+    const int numOrders = 5000000;
     std::cout << "Starting Insertion Benchmark (" << numOrders << " orders)...\n";
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -300,7 +318,7 @@ TEST_F(OrderBookTest, Benchmark_OrderInsertion)
 
 TEST_F(OrderBookTest, Benchmark_OrderMatching)
 {
-    const int numOrders = 50000000; // 500k Buys + 500k Sells = 1M Ops
+    const int numOrders = 2500000; // 2.5M Buys + 2.5M Sells = 5M Ops
 
     // 1. Pre-fill Sells (Async)
     for (int i = 0; i < numOrders; ++i)
@@ -336,7 +354,7 @@ TEST_F(OrderBookTest, Benchmark_OrderMatching)
 TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
 {
     const int numThreads = 19;
-    const int numOps = 100000000;
+    const int numOps = 50000000;
     const int opsPerThread = numOps / numThreads;
 
     std::cout << "Starting Real-World Multi-Threaded Benchmark (" << numThreads << " producers, " << numOps

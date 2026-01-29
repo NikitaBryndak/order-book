@@ -1,6 +1,7 @@
 #include "Orderbook.hpp"
 #include "Order.hpp"
 #include "Constants.hpp"
+#include <stdexcept>
 
 void Orderbook::matchOrders(OrderPointer newOrder)
 {
@@ -18,11 +19,13 @@ void Orderbook::matchOrders(OrderPointer newOrder)
             // Lazy cleanup of cancelled orders
             if (!asks.front()->isValid())
             {
+                auto cancelled = asks.front();
                 asks.pop_front();
                 if (asks.empty())
                 {
                     asks_.erase(asks_.begin());
                 }
+                orderPool_.release(cancelled);
                 continue;
             }
 
@@ -38,9 +41,11 @@ void Orderbook::matchOrders(OrderPointer newOrder)
 
             if (asks.front()->isFilled())
             {
-                orders_.erase(asks.front()->getOrderId());
+                OrderPointer filled = asks.front();
+                orders_.erase(filled->getOrderId());
                 asks.pop_front();
                 size_--;
+                orderPool_.release(filled);
             }
 
             if (asks.empty())
@@ -63,11 +68,13 @@ void Orderbook::matchOrders(OrderPointer newOrder)
             // Lazy cleanup of cancelled orders
             if (!bids.front()->isValid())
             {
+                auto cancelled = bids.front();
                 bids.pop_front();
                 if (bids.empty())
                 {
                     bids_.erase(bids_.begin());
                 }
+                orderPool_.release(cancelled);
                 continue;
             }
 
@@ -83,9 +90,11 @@ void Orderbook::matchOrders(OrderPointer newOrder)
 
             if (bids.front()->isFilled())
             {
+                OrderPointer filled = bids.front();
                 orders_.erase(bids.front()->getOrderId());
                 bids.pop_front();
                 size_--;
+                orderPool_.release(filled);
             }
 
             if (bids.empty())
@@ -98,7 +107,18 @@ void Orderbook::matchOrders(OrderPointer newOrder)
 
 void Orderbook::addOrder(const Order &order)
 {
-    OrderPointer orderPtr = std::make_shared<Order>(order);
+    OrderPointer orderPtr = orderPool_.acquire(
+        order.getOrderId(),
+        order.getOrderType(),
+        order.getPrice(),
+        order.getQuantity(),
+        order.getSide()
+    );
+
+    if (!orderPtr)
+    {
+        throw std::runtime_error("Out of orders");
+    }
 
     matchOrders(orderPtr);
 
@@ -115,6 +135,10 @@ void Orderbook::addOrder(const Order &order)
 
         orders_[order.getOrderId()] = orderPtr;
         size_++;
+    }
+    else
+    {
+        orderPool_.release(orderPtr);
     }
 }
 

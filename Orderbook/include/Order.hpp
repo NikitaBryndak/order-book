@@ -54,5 +54,11 @@ private:
     bool valid_ = true; // used to mark orders as ghosts for better cache locality
 };
 
-using OrderPointer = std::shared_ptr<Order>;
+struct OrderRequest
+{
+    RequestType type;
+    Order order;
+};
+
+using OrderPointer = Order*;
 using OrderList = std::list<OrderPointer>;
