@@ -5,20 +5,23 @@
 #include <map>
 #include <unordered_map>
 #include <utility>
+#include <thread>
+#include <cmath>
 
 #include "Constants.hpp"
 #include "Order.hpp"
 #include "OrderPool.hpp"
+#include "RingBuffer.hpp"
 
 class Orderbook
 {
 public:
-    void processRequest(const OrderRequest& request);
-    size_t size() { return size_; };
-    explicit Orderbook(size_t maxOrders = 10000000)
-        : orderPool_(maxOrders) {
+    void submitRequest(OrderRequest& request);
+    size_t size() const { return size_; };
 
-          };
+    explicit Orderbook(size_t maxOrders);
+
+    ~Orderbook();
 
 private:
     void addOrder(const Order& order);
@@ -26,7 +29,12 @@ private:
     void modifyOrder(const Order& order);
     void matchOrders(OrderPointer newOrder);
 
+    void processLoop();
+
     OrderPool<Order> orderPool_;
+    RingBuffer<OrderRequest> buffer_;
+
+    std::thread workerThread_;
 
     std::map<Price, OrderList, std::greater<Price>> bids_;
     std::map<Price, OrderList, std::less<Price>> asks_;

@@ -1,6 +1,7 @@
 #include "Orderbook.hpp"
 #include "Order.hpp"
 #include "Constants.hpp"
+#include "utils.hpp"
 #include <stdexcept>
 
 void Orderbook::matchOrders(OrderPointer newOrder)
@@ -158,21 +159,48 @@ void Orderbook::modifyOrder(const Order &order)
     this->addOrder(order);
 }
 
-void Orderbook::processRequest(const OrderRequest &request)
+void Orderbook::submitRequest(OrderRequest &request)
 {
-    switch (request.type)
+    buffer_.push(std::move(request));
+}
+
+void Orderbook::processLoop()
+{
+    while (true)
     {
-    case (RequestType::Add):
-        this->addOrder(request.order);
-        break;
+        OrderRequest request = buffer_.pop();
+        switch (request.type)
+        {
+        case (RequestType::Add):
+            this->addOrder(request.order);
+            break;
 
-    case (RequestType::Cancel):
-        this->cancelOrder(request.order.getOrderId());
-        break;
+        case (RequestType::Cancel):
+            this->cancelOrder(request.order.getOrderId());
+            break;
 
-    case (RequestType::Modify):
-        this->modifyOrder(request.order);
-        break;
+        case (RequestType::Modify):
+            this->modifyOrder(request.order);
+            break;
+        case (RequestType::Stop):
+            return;
+        }
+    }
+}
 
+Orderbook::Orderbook(size_t maxOrders) : orderPool_(maxOrders), buffer_(nextPowerOf2(maxOrders)){
+    workerThread_ = std::thread(&Orderbook::processLoop, this);
+}
+
+Orderbook::~Orderbook()
+{
+    OrderRequest stop;
+    stop.type = RequestType::Stop;
+
+    submitRequest(stop);
+
+    if (workerThread_.joinable())
+    {
+        workerThread_.join();
     }
 }

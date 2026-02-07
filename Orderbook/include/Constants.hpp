@@ -11,5 +11,6 @@ enum RequestType
 {
     Add,
     Cancel,
-    Modify
+    Modify,
+    Stop
 };

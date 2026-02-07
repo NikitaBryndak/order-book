@@ -1,23 +1,38 @@
-# Order Book
+# High-Performance Order Book
 
-A high-performance, thread-safe implementation of a Limit Order Book in C++20. This project demonstrates a matching engine capable of handling limit orders (Buy/Sell), cancellations, and automatic trade execution with Price/Time priority.
+A low-latency, thread-safe implementation of a Limit Order Book (LOB) written in C++20. This project demonstrates a matching engine capable of handling millions of operations per second, supporting Limit Buy/Sell orders, cancellations, and modifications with Price/Time priority.
 
-## Features
+## 🚀 Key Features
 
-*   **Limit Orders:** Support for Buy and Sell limit orders.
-*   **Automatic Matching:** Orders are matched automatically based on Price/Time priority.
-*   **Thread Safety:** Fully thread-safe operations allowing concurrent order submission and cancellation.
-*   **Lazy Cancellation:** Implements "ghost orders" to optimize cancellation performance by deferring cleanup until necessary.
-*   **Performance:** Includes built-in benchmarks to measure Operations Per Second (OPS).
-*   **Testing:** Comprehensive unit test suite using Google Test.
+*   **High Performance:** Capable of processing over **3 million operations per second** on standard hardware.
+*   **Lock-Free Command Queue:** Uses a highly optimized, cache-friendly `RingBuffer` for non-blocking communication between order producers and the matching engine.
+*   **Memory Pooling:** Custom `OrderPool` reduces heap allocation overhead during runtime, ensuring stable latency.
+*   **Price/Time Priority:** Standard FIFO matching algorithm.
+*   **Lazy Cancellation:** Efficient order cancellation strategy ("ghost orders") to minimize O(n) traversals in linked lists.
+*   **Thread Safety:** Supports concurrent order submission from multiple threads.
 
-## Prerequisites
+## 🛠️ Technology Stack
 
+*   **Language:** C++20
+*   **Build System:** CMake (3.10+)
+*   **Testing:** Google Test (GTest)
+*   **Platform:** Cross-platform (Windows, Linux, macOS)
+
+## 🏗️ Architecture
+
+The system consists of two main components running on separate threads to maximize throughput:
+
+1.  **Request Handling (Producers):** Multiple threads can submit `OrderRequest` objects (`Add`, `Cancel`, `Modify`). These requests are pushed into a lock-free Ring Buffer.
+2.  **Matching Engine (Consumer):** A dedicated single thread polls the Ring Buffer, processes requests sequentially, and executes matches. This design avoids heavy locking on the critical path.
+3.  **Memory Management:** Pre-allocated memory pools prevent expensive `new`/`delete` calls during the trading session.
+
+## 📦 Build Instructions
+
+### Prerequisites
 *   C++20 compatible compiler (GCC, Clang, MSVC)
 *   CMake 3.10 or higher
 
-## Build Instructions
-
+### Building
 1.  Clone the repository:
     ```bash
     git clone https://github.com/NikitaBryndak/order-book.git
@@ -29,39 +44,40 @@ A high-performance, thread-safe implementation of a Limit Order Book in C++20. T
     mkdir build
     cd build
     cmake ..
-    cmake --build .
+    cmake --build . --config Release
     ```
 
-## Running the Application
+## ⚡ Running Benchmarks & Tests
 
-### Benchmark Demo
-The main application runs a multi-threaded benchmark to demonstrate throughput.
-
-```bash
-./bin/order_book
-```
-*Note: On Windows, the executable will be `.\bin\order_book.exe`.*
-
-### Running Tests
-The project uses Google Test for unit testing.
+### Unit Tests
+The project includes a comprehensive test suite using Google Test.
 
 ```bash
+# From the build directory
 ./bin/OrderBookTests
 ```
-*Note: On Windows, the executable will be `.\bin\OrderBookTests.exe`.*
+*Note: On Windows, use `.\bin\OrderBookTests.exe` (and ensure your compiler's bin directory is in PATH).*
 
-## Performance
+### Performance Benchmarks
+The tests include a built-in benchmark scenario simulating real-world traffic with 10 concurrent producer threads.
 
-The system includes performance tests to measure throughput under load.
+**Sample Output (10 Threads, 10M Operations):**
+```text
+[ RUN      ] OrderBookTest.Benchmark_RealWorldScenario
+Starting Multi-Threaded Benchmark (10 producers, 10000000 ops)...
+Processed 10000000 ops in 3.24291 s
+Throughput: 3083649 ops/sec
+[       OK ] OrderBookTest.Benchmark_RealWorldScenario
+```
 
-*   **Single Threaded:** ~725k OPS
-*   **Multi-Threaded (4 threads):** ~420k OPS
+## 📂 Project Structure
 
-*Performance metrics may vary based on hardware.*
-
-## Project Structure
-
-*   `Orderbook/`: Source code for the Order Book library and main application.
-    *   `include/`: Header files (`Orderbook.hpp`, `Order.hpp`).
-    *   `src/`: Implementation files.
-*   `test/`: Unit tests using Google Test.
+```
+OrderBook/
+├── Orderbook/          # Core library source code
+│   ├── include/        # Header files (Orderbook.hpp, RingBuffer.hpp, etc.)
+│   └── src/            # Implementation files
+├── test/               # Unit tests and benchmarks
+├── build/              # Compiled binaries (generated)
+└── CMakeLists.txt      # Root build configuration
+```
