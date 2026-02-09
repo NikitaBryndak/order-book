@@ -1,9 +1,8 @@
 #pragma once
 #include <cstdint>
 #include <algorithm>
-#include <list>
-#include <iostream>
-#include <memory>
+#include <deque>
+#include <ostream>
 
 #include "Constants.hpp"
 
@@ -61,4 +60,4 @@ struct OrderRequest
 };
 
 using OrderPointer = Order*;
-using OrderList = std::list<OrderPointer>;
+using OrderList = std::deque<OrderPointer>;

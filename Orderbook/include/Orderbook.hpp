@@ -1,12 +1,8 @@
 #pragma once
-#include <atomic>
-#include <functional>
 #include <list>
 #include <map>
 #include <unordered_map>
-#include <utility>
 #include <thread>
-#include <cmath>
 
 #include "Constants.hpp"
 #include "Order.hpp"

@@ -1,10 +1,10 @@
 #pragma once
-#include <vector>
 #include <atomic>
 #include <thread>
 #include <utility>
 #include <stdexcept>
 #include <memory>
+#include <immintrin.h>
 
 template <typename T>
 class RingBuffer
@@ -43,7 +43,7 @@ public:
 
         while (buffer_[index].written.load(std::memory_order_acquire))
         {
-            std::this_thread::yield();
+            _mm_pause();
         }
 
         buffer_[index].data = std::move(item);
@@ -56,7 +56,7 @@ public:
 
         while (!buffer_[index].written.load(std::memory_order_acquire))
         {
-            std::atomic_thread_fence(std::memory_order_acquire);
+            _mm_pause();
         }
 
         T item = std::move(buffer_[index].data);

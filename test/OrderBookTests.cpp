@@ -178,7 +178,7 @@ TEST_F(OrderBookTest, Benchmark_OrderInsertion)
 TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
 {
     const int numThreads = 10;
-    const int numOps = 10000000;
+    const int numOps = 100000000;
     const int opsPerThread = numOps / numThreads;
 
     std::cout << "Starting Multi-Threaded Benchmark (" << numThreads << " producers, " << numOps << " ops)...\n";
@@ -186,7 +186,7 @@ TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
     auto start = std::chrono::high_resolution_clock::now();
 
     {
-        Orderbook benchOb(1 << 24);
+        Orderbook benchOb(1 << 26);
         std::vector<std::thread> producers;
         producers.reserve(numThreads);
 
