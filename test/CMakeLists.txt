@@ -15,5 +15,7 @@ target_link_libraries(OrderBookTests
     OrderBookLib
 )
 
+target_link_options(OrderBookTests PRIVATE -static)
+
 include(GoogleTest)
 gtest_discover_tests(OrderBookTests)

@@ -6,8 +6,8 @@
 #include <random>
 #include <memory>
 
-#include "Order.hpp"
-#include "Orderbook.hpp"
+#include "Orderbook/Order.hpp"
+#include "Orderbook/Orderbook.hpp"
 
 class OrderBookTest : public ::testing::Test
 {
