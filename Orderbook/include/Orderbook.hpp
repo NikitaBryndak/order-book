@@ -15,7 +15,7 @@ public:
     void submitRequest(OrderRequest& request);
     size_t size() const { return size_; };
 
-    explicit Orderbook(size_t maxOrders);
+    explicit Orderbook(size_t maxOrders, int coreId = -1);
 
     ~Orderbook();
 

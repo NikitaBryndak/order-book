@@ -3,6 +3,9 @@
 #include "Constants.hpp"
 #include "utils.hpp"
 #include <stdexcept>
+#include <iostream>
+#include <sched.h>
+#include <pthread.h>
 
 void Orderbook::matchOrders(OrderPointer newOrder)
 {
@@ -18,10 +21,11 @@ void Orderbook::matchOrders(OrderPointer newOrder)
             auto &[bestAskPrice, asks] = *asks_.begin();
 
             // Lazy cleanup of cancelled orders
-            if (!asks.front()->isValid())
+            if (!asks.front()->isValid()) [[unlikely]]
             {
                 auto cancelled = asks.front();
                 asks.pop_front();
+
                 if (asks.empty())
                 {
                     asks_.erase(asks_.begin());
@@ -188,8 +192,22 @@ void Orderbook::processLoop()
     }
 }
 
-Orderbook::Orderbook(size_t maxOrders) : orderPool_(maxOrders), buffer_(nextPowerOf2(maxOrders)){
+Orderbook::Orderbook(size_t maxOrders, int coreId) : orderPool_(maxOrders), buffer_(nextPowerOf2(maxOrders))
+{
     workerThread_ = std::thread(&Orderbook::processLoop, this);
+
+    if (coreId >= 0)
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(coreId, &cpuset);
+
+        int rc = pthread_setaffinity_np(workerThread_.native_handle(), sizeof(cpu_set_t), &cpuset);
+
+        if (rc != 0) {
+            std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+        }
+    }
 }
 
 Orderbook::~Orderbook()
