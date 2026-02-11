@@ -295,6 +295,18 @@ void Orderbook::printState() const
     std::cout << std::flush;
 }
 
+Price Orderbook::topBidPrice() const
+{
+    const auto [p, _]  = *(bids_.begin());
+    return p;
+}
+
+Price Orderbook::topBidPrice() const
+{
+    const auto [p, _]  = *(asks_.begin());
+    return p;
+}
+
 Orderbook::Orderbook(size_t maxOrders, int coreId, bool verbose) : orderPool_(maxOrders), buffer_(nextPowerOf2(maxOrders)), verbose_(verbose)
 {
     workerThread_ = std::thread(&Orderbook::processLoop, this);

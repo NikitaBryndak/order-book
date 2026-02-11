@@ -17,6 +17,9 @@ public:
 
     explicit Orderbook(size_t maxOrders, int coreId = -1, bool verbose = false);
 
+    Price topBidPrice() const;
+    Price topAskPrice() const;
+
     ~Orderbook();
 
 private:
@@ -43,19 +46,5 @@ private:
     bool verbose_{false};
 
     void printState() const;
-    // {
-    //     system("clear");
-
-    //     std::cout << "Real-Time Orderbook State\n";
-    //     std::cout << "=========================\n";
-
-    //     if (!bids_.empty() && !asks_.empty())
-    //     {
-    //         Price bestBid = bids_.begin()->first;
-    //         Price bestAsk = asks_.begin()->first;
-    //         Price midPrice = (bestBid + bestAsk) / 2;
-
-    //     }
-    // };
 
 };
