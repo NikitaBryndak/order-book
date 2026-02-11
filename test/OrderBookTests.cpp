@@ -17,7 +17,7 @@ protected:
     void SetUp() override
     {
         // Initialize Orderbook with 1 Million capacity
-        ob_ = std::make_unique<Orderbook>(1 << 20);
+        ob_ = std::make_unique<Orderbook>(1 << 20, 0, false);
     }
 
     void TearDown() override

@@ -15,7 +15,7 @@ public:
     void submitRequest(OrderRequest& request);
     size_t size() const { return size_; };
 
-    explicit Orderbook(size_t maxOrders, int coreId = -1);
+    explicit Orderbook(size_t maxOrders, int coreId = -1, bool verbose = false);
 
     ~Orderbook();
 
@@ -32,9 +32,30 @@ private:
 
     std::thread workerThread_;
 
+    std::unordered_map<Price, Quantity> bidLevels_;
+    std::unordered_map<Price, Quantity> askLevels_;
+
     std::map<Price, OrderList, std::greater<Price>> bids_;
     std::map<Price, OrderList, std::less<Price>> asks_;
     std::unordered_map<OrderId, OrderPointer> orders_;
 
     size_t size_{0};
+    bool verbose_{false};
+
+    void printState() const;
+    // {
+    //     system("clear");
+
+    //     std::cout << "Real-Time Orderbook State\n";
+    //     std::cout << "=========================\n";
+
+    //     if (!bids_.empty() && !asks_.empty())
+    //     {
+    //         Price bestBid = bids_.begin()->first;
+    //         Price bestAsk = asks_.begin()->first;
+    //         Price midPrice = (bestBid + bestAsk) / 2;
+
+    //     }
+    // };
+
 };
