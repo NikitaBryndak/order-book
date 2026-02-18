@@ -31,14 +31,16 @@ protected:
     // Fixed: Added traderId (1) to Order constructor
     void AddBuy(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
     {
-        Order order(1, id, type, price, qty, Side::Buy);
+        // Order constructor is (orderId, owner, ...)
+        Order order(id, 1, type, price, qty, Side::Buy);
         OrderRequest req{RequestType::Add, order};
         ob_->submitRequest(req);
     }
 
     void AddSell(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
     {
-        Order order(2, id, type, price, qty, Side::Sell); // Using Trader 2 for sells
+        // Order constructor is (orderId, owner, ...); owner 2 for sells
+        Order order(id, 2, type, price, qty, Side::Sell); // Using Trader 2 for sells
         OrderRequest req{RequestType::Add, order};
         ob_->submitRequest(req);
     }
@@ -46,14 +48,16 @@ protected:
     void Cancel(OrderId id)
     {
         // Trader ID matches the AddBuy (1)
-        Order order(1, id, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+        // Order constructor is (orderId, owner, ...)
+        Order order(id, 1, OrderType::GoodTillCancel, 0, 0, Side::Buy);
         OrderRequest req{RequestType::Cancel, order};
         ob_->submitRequest(req);
     }
 
     void Modify(OrderId id, OrderType type, Price price, Quantity qty, Side side)
     {
-        Order order(1, id, type, price, qty, side);
+        // Order constructor is (orderId, owner, ...)
+        Order order(id, 1, type, price, qty, side);
         OrderRequest req{RequestType::Modify, order};
         ob_->submitRequest(req);
     }
@@ -149,6 +153,126 @@ TEST_F(OrderBookTest, ModifyOrder)
 }
 
 // ==========================================
+// 1.b ADDITIONAL UNIT TESTS
+// ==========================================
+
+TEST_F(OrderBookTest, TopPrices_AfterAdds)
+{
+    AddBuy(1, 100, 10);
+    AddBuy(2, 110, 10);
+    AddSell(3, 120, 10);
+    AddSell(4, 115, 10);
+
+    WaitForSize(4);
+
+    EXPECT_EQ(ob_->topBidPrice(), 110);
+    EXPECT_EQ(ob_->topAskPrice(), 115);
+}
+
+TEST_F(OrderBookTest, TradeListener_SingleMatch)
+{
+    Trades trades;
+    ob_->setTradeListener([&trades](Trade &t) { trades.push_back(t); });
+
+    AddSell(1, 100, 10);
+    WaitForSize(1);
+    AddBuy(2, 100, 10);
+
+    // wait for async match
+    int retries = 0;
+    while (trades.size() < 1 && retries++ < 100) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+    ASSERT_EQ(trades.size(), 1);
+    EXPECT_EQ(trades[0].qty, 10);
+    EXPECT_EQ(trades[0].bid->getPrice(), 100);
+    EXPECT_EQ(trades[0].ask->getPrice(), 100);
+    EXPECT_EQ(ob_->matchedTrades(), 1);
+}
+
+TEST_F(OrderBookTest, FillAndKill_NotResting)
+{
+    // Order constructor is (orderId, owner, ...)
+    Order order(999, 1, OrderType::FillAndKill, 100, 10, Side::Buy);
+    OrderRequest req{RequestType::Add, order};
+    ob_->submitRequest(req);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    EXPECT_EQ(ob_->size(), 0);
+    EXPECT_EQ(ob_->topBidPrice(), 0);
+}
+
+TEST_F(OrderBookTest, CancelNonexistent_NoCrash)
+{
+    AddBuy(1, 100, 10);
+    WaitForSize(1);
+
+    Cancel(9999); // no such order
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    EXPECT_EQ(ob_->size(), 1);
+}
+
+TEST_F(OrderBookTest, PriceTimePriority_FIFO)
+{
+    Trades trades;
+    ob_->setTradeListener([&trades](Trade &t) { trades.push_back(t); });
+
+    // Two resting asks at same price (IDs 1 then 2)
+    AddSell(1, 100, 10);
+    AddSell(2, 100, 10);
+    WaitForSize(2);
+
+    // Aggressive buy consumes first ask fully then partially second
+    AddBuy(3, 100, 15);
+
+    int retries = 0;
+    while (trades.size() < 2 && retries++ < 200) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+    ASSERT_GE(trades.size(), 2);
+    EXPECT_EQ(trades[0].ask->getOrderId(), 1);
+    EXPECT_EQ(trades[1].ask->getOrderId(), 2);
+}
+
+TEST_F(OrderBookTest, ModifyOrder_ChangePrice_Reshuffles)
+{
+    AddBuy(1, 100, 10);
+    AddBuy(2, 101, 10);
+    WaitForSize(2);
+
+    // Move order 1 to a better price
+    Modify(1, OrderType::GoodTillCancel, 102, 10, Side::Buy);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    EXPECT_EQ(ob_->topBidPrice(), 102);
+    EXPECT_EQ(ob_->size(), 2);
+}
+
+TEST_F(OrderBookTest, TopPrice_AfterCancel)
+{
+    AddBuy(1, 100, 10);
+    AddBuy(2, 110, 10);
+    WaitForSize(2);
+
+    Cancel(2);
+    WaitForSize(1);
+
+    EXPECT_EQ(ob_->topBidPrice(), 100);
+}
+
+TEST_F(OrderBookTest, ModifyOrder_ChangeSide)
+{
+    AddBuy(1, 100, 10);
+    WaitForSize(1);
+
+    // Change side to Sell with same ID
+    Modify(1, OrderType::GoodTillCancel, 100, 10, Side::Sell);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+
+    EXPECT_EQ(ob_->topBidPrice(), 0);
+    EXPECT_EQ(ob_->topAskPrice(), 100);
+    EXPECT_EQ(ob_->size(), 1);
+}
+
+// ==========================================
 // 2. HIGH PERFORMANCE BENCHMARKS
 // ==========================================
 
@@ -166,7 +290,8 @@ TEST_F(OrderBookTest, Benchmark_OrderInsertion)
         for (int i = 0; i < numOrders; ++i)
         {
             // TraderID 1, OrderID i
-            Order order(1, i, OrderType::GoodTillCancel, 100, 10, Side::Buy);
+            // Order constructor is (orderId, owner, ...)
+            Order order(i, 1, OrderType::GoodTillCancel, 100, 10, Side::Buy);
             OrderRequest req{RequestType::Add, order};
             benchOb.submitRequest(req);
         }
@@ -215,7 +340,8 @@ TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
                         Side s = sideDist(gen) == 0 ? Side::Buy : Side::Sell;
 
                         // TraderID = t
-                        Order order(t, nextOrderId++, OrderType::GoodTillCancel, 100, qtyDist(gen), s);
+                        // Order constructor is (orderId, owner, ...)
+                        Order order(nextOrderId++, t, OrderType::GoodTillCancel, 100, qtyDist(gen), s);
                         OrderRequest req{RequestType::Add, order};
 
                         benchOb.submitRequest(req);

@@ -38,3 +38,4 @@ class NoiseTrader : public Trader {
     }
   }
 };
+

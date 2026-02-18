@@ -32,20 +32,13 @@ The system consists of two main components running on separate threads to maximi
 *   C++20 compatible compiler (GCC, Clang, MSVC)
 *   CMake 3.10 or higher
 
-### Building
-1.  Clone the repository:
-    ```bash
-    git clone https://github.com/NikitaBryndak/order-book.git
-    cd order-book
-    ```
-
-2.  Create a build directory and compile:
-    ```bash
-    mkdir build
-    cd build
-    cmake ..
-    cmake --build . --config Release
-    ```
+```bash
+git clone <repo>
+cd order-book
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
+```
 
 ## ⚡ Running Benchmarks & Tests
 
