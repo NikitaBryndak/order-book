@@ -1,10 +1,8 @@
 #pragma once
 
-/**
- * @brief Global configuration constants for the Orderbook.
- */
 namespace Config {
-    extern const int barWidth = 20;
-    extern const int nPSpread = 10;
-    extern const int nQSpread = 10;
+    inline static constexpr int barWidth = 20;
+    inline static constexpr int nPSpread = 10;
+    inline static constexpr int nQSpread = 10;
+    inline static constexpr int maxOrdersPerTrader = 1000;
 }

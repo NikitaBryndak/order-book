@@ -1,55 +1,52 @@
 #include "Orderbook/Orderbook.hpp"
-#include "Trader/Trader.hpp"
+#include "Orderbook/Order.hpp"
+#include "Trader/TraderManager.hpp"
 #include "Trader/NoiseTrader.hpp"
+
 #include <iostream>
-#include <vector>
 #include <thread>
-#include <random>
+#include <vector>
+#include <memory>
 #include <chrono>
+#include <limits>
+#include <cstdlib>
 
-void trader(Orderbook& ob, int id, int numOrders) {
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_int_distribution<Price> priceDist(350, 400);
-    std::uniform_int_distribution<Quantity> qtyDist(10, 100);
-    std::uniform_int_distribution<int> sideDist(0, 1);
+int main(int argc, char** argv) {
+    const int nTraders = (argc > 1) ? std::atoi(argv[1]) : 10;
+    const int runSecs = (argc > 2) ? std::atoi(argv[2]) : 5;
 
-    for (int i = 0; i < numOrders; ++i) {
-        Side side = (sideDist(rng) == 0) ? Side::Buy : Side::Sell;
-        Price price = priceDist(rng);
-        Quantity qty = qtyDist(rng);
-        OrderId oid = (static_cast<OrderId>(id) << 32) | i;
+    // create orderbook and trader manager
+    Orderbook ob(1 << 20, -1, true);
+    TraderManager mgr(ob, /*sleepUs=*/1000);
 
+    // NoiseTraders with "infinite" money
+    const uint64_t infiniteCash = std::numeric_limits<uint64_t>::max();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-}
-
-int main() {
-
-    int ntq = 40;
-    int wtq = 5;
-    int mtq = 20;
-
-    Orderbook ob(1 << 19, 0, false);
-
-    std::vector<Trader> traders;
-
-    // ntq
-    for (int i = 0; i < ntq; ++i) {
-        traders.emplace_back(new NoiseTrader(10000));
+    for (int i = 0; i < nTraders; ++i) {
+        mgr.addTrader(std::make_unique<NoiseTrader>(static_cast<uint32_t>(i + 1), infiniteCash, ob));
     }
 
-    while (true)
-    {
+    mgr.start();
+    std::cout << "Started " << nTraders << " NoiseTraders (infinite cash) for " << runSecs << "s...\n";
 
+    // Send a Print request to the Orderbook every second while traders run
+    auto endTime = std::chrono::steady_clock::now() + std::chrono::seconds(runSecs);
+    while (std::chrono::steady_clock::now() < endTime) {
+        OrderRequest printReq{RequestType::Print, Order()};
+        ob.submitRequest(printReq);
+        std::this_thread::sleep_for(std::chrono::microseconds(1));
     }
 
+    // final state print
+    OrderRequest finalPrint{RequestType::Print, Order()};
+    ob.submitRequest(finalPrint);
 
+    mgr.stop();
+    mgr.join();
 
-    for (auto& t : traders) {
-        t.join();
-    }
-
-
+    std::cout << "Done. Resting orders: " << ob.size()
+              << "  TotalMatches=" << ob.matchedTrades()
+              << "  TopBid=" << ob.topBidPrice()
+              << "  TopAsk=" << ob.topAskPrice() << "\n";
     return 0;
 }

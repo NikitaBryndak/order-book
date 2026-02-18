@@ -14,11 +14,15 @@ class Orderbook
 public:
     void submitRequest(OrderRequest& request);
     size_t size() const { return size_; };
+    uint64_t matchedTrades() const { return matchedTrades_.load(); };
 
     explicit Orderbook(size_t maxOrders, int coreId = -1, bool verbose = false);
 
     Price topBidPrice() const;
     Price topAskPrice() const;
+
+    // void setAckListener(AckListener listener) { ackListener_ = listener; };
+    void setTradeListener(TradeListener listener) { listener_ = listener; };
 
     ~Orderbook();
 
@@ -27,6 +31,9 @@ private:
     void cancelOrder(const OrderId& orderId);
     void modifyOrder(const Order& order);
     void matchOrders(OrderPointer newOrder);
+
+    // void sendAck(OrderPointer&);
+    inline void onMatch(const OrderPointer& b, const OrderPointer& a, Quantity& qty);
 
     void processLoop();
 
@@ -44,6 +51,11 @@ private:
 
     size_t size_{0};
     bool verbose_{false};
+
+    TradeListener listener_;
+    // AckListener ackListener_;
+
+    std::atomic<uint64_t> matchedTrades_{0};
 
     void printState() const;
 

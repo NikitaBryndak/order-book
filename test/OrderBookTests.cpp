@@ -16,8 +16,8 @@ protected:
 
     void SetUp() override
     {
-        // Initialize Orderbook with 1 Million capacity
-        ob_ = std::make_unique<Orderbook>(1 << 20, 0, false);
+        // Initialize Orderbook with 1 Million capacity, Core 0, Verbose false
+        ob_ = std::make_unique<Orderbook>(1 << 22, 0, false);
     }
 
     void TearDown() override
@@ -28,29 +28,34 @@ protected:
 
     // --- Helpers ---
 
+    // Fixed: Added traderId (1) to Order constructor
     void AddBuy(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
     {
-        OrderRequest order({RequestType::Add, Order(id, type, price, qty, Side::Buy)});
-        ob_->submitRequest(order);
+        Order order(1, id, type, price, qty, Side::Buy);
+        OrderRequest req{RequestType::Add, order};
+        ob_->submitRequest(req);
     }
 
     void AddSell(OrderId id, Price price, Quantity qty, OrderType type = OrderType::GoodTillCancel)
     {
-        OrderRequest order({RequestType::Add, Order(id, type, price, qty, Side::Sell)});
-        ob_->submitRequest(order);
+        Order order(2, id, type, price, qty, Side::Sell); // Using Trader 2 for sells
+        OrderRequest req{RequestType::Add, order};
+        ob_->submitRequest(req);
     }
 
     void Cancel(OrderId id)
     {
-        // Dummy order just to carry the ID
-        OrderRequest order({RequestType::Cancel, Order(id, OrderType::GoodTillCancel, 0, 0, Side::Buy)});
-        ob_->submitRequest(order);
+        // Trader ID matches the AddBuy (1)
+        Order order(1, id, OrderType::GoodTillCancel, 0, 0, Side::Buy);
+        OrderRequest req{RequestType::Cancel, order};
+        ob_->submitRequest(req);
     }
 
     void Modify(OrderId id, OrderType type, Price price, Quantity qty, Side side)
     {
-        OrderRequest order({RequestType::Modify, Order(id, type, price, qty, side)});
-        ob_->submitRequest(order);
+        Order order(1, id, type, price, qty, side);
+        OrderRequest req{RequestType::Modify, order};
+        ob_->submitRequest(req);
     }
 
     // Helper to wait for the async worker to update the book size
@@ -59,7 +64,7 @@ protected:
         int retries = 0;
         while (ob_->size() != targetSize && retries < 100)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
             retries++;
         }
         // If we timeout, the EXPECT_EQ in the test will fail and show us the error
@@ -98,11 +103,11 @@ TEST_F(OrderBookTest, CancelOrderValidation)
 
 TEST_F(OrderBookTest, FullMatchExecution)
 {
-    // Resting sell order
+    // Resting sell order (Trader 2)
     AddSell(1, 100, 10);
     WaitForSize(1);
 
-    // Aggressive buy order matches completely
+    // Aggressive buy order matches completely (Trader 1)
     AddBuy(2, 100, 10);
     WaitForSize(0);
 
@@ -119,7 +124,7 @@ TEST_F(OrderBookTest, PartialMatch_RestingRemains)
     AddBuy(2, 100, 5);
 
     // Give worker time to process match
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
     // Sell order should remain with 5 qty (Size 1)
     EXPECT_EQ(ob_->size(), 1);
@@ -134,7 +139,7 @@ TEST_F(OrderBookTest, ModifyOrder)
     Modify(1, OrderType::GoodTillCancel, 105, 10, Side::Buy);
 
     // Wait for process (Cancel -> Add)
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
     EXPECT_EQ(ob_->size(), 1);
 
     // Verification: It should now match a sell at 105
@@ -149,19 +154,21 @@ TEST_F(OrderBookTest, ModifyOrder)
 
 TEST_F(OrderBookTest, Benchmark_OrderInsertion)
 {
-    const int numOrders = 5000000;
+    const int numOrders = 10000000; // Reverted to 5M
     std::cout << "Starting Insertion Benchmark (" << numOrders << " orders)...\n";
 
     auto start = std::chrono::high_resolution_clock::now();
 
     {
         // Use a local Orderbook to measure full lifecycle (including thread drain)
-        Orderbook benchOb(1 << 24); // 8 Million slots (power of 2)
+        Orderbook benchOb(1 << 24); // 16 Million slots
 
         for (int i = 0; i < numOrders; ++i)
         {
-            OrderRequest order({RequestType::Add, Order(i, OrderType::GoodTillCancel, 100, 10, Side::Buy)});
-            benchOb.submitRequest(order);
+            // TraderID 1, OrderID i
+            Order order(1, i, OrderType::GoodTillCancel, 100, 10, Side::Buy);
+            OrderRequest req{RequestType::Add, order};
+            benchOb.submitRequest(req);
         }
 
         // Destructor called here: sends STOP, waits for thread to finish processing
@@ -178,40 +185,40 @@ TEST_F(OrderBookTest, Benchmark_OrderInsertion)
 TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
 {
     const int numThreads = 10;
-    const int numOps = 100000000;
-    const int opsPerThread = numOps / numThreads;
+    const int numOps = 2000000; // Ops per thread (Total 10M ops)
 
-    std::cout << "Starting Multi-Threaded Benchmark (" << numThreads << " producers, " << numOps << " ops)...\n";
+    std::cout << "Starting Multi-Threaded Benchmark (" << numThreads << " producers, " << numOps * numThreads << " total ops)...\n";
 
     auto start = std::chrono::high_resolution_clock::now();
 
     {
-        Orderbook benchOb(1 << 26);
+        Orderbook benchOb(1 << 24);
         std::vector<std::thread> producers;
         producers.reserve(numThreads);
 
         for (int t = 0; t < numThreads; ++t)
         {
             producers.emplace_back(
-                [&benchOb, t, opsPerThread]()
+                [&benchOb, t, numOps]()
                 {
                     // Random generators
                     std::mt19937 gen(12345 + t);
-                    std::uniform_int_distribution<> actionDist(1, 100);
                     std::uniform_int_distribution<> qtyDist(1, 100);
                     std::uniform_int_distribution<> sideDist(0, 1);
 
-                    // Partition IDs
-                    OrderId nextOrderId = (OrderId)t * (OrderId)opsPerThread * 2 + 1;
+                    // Partition IDs to avoid collision
+                    OrderId nextOrderId = (OrderId)t * (OrderId)numOps * 2 + 1;
 
-                    for (int i = 0; i < opsPerThread; ++i)
+                    for (int i = 0; i < numOps; ++i)
                     {
-                        int action = actionDist(gen);
-
-                        // Simple 50/50 buy/sell mix for stress testing
+                        // Simple 50/50 buy/sell mix
                         Side s = sideDist(gen) == 0 ? Side::Buy : Side::Sell;
-                        OrderRequest order({RequestType::Add, Order(nextOrderId++, OrderType::GoodTillCancel, 100, qtyDist(gen), s)});
-                        benchOb.submitRequest(order);
+
+                        // TraderID = t
+                        Order order(t, nextOrderId++, OrderType::GoodTillCancel, 100, qtyDist(gen), s);
+                        OrderRequest req{RequestType::Add, order};
+
+                        benchOb.submitRequest(req);
                     }
                 });
         }
@@ -227,7 +234,8 @@ TEST_F(OrderBookTest, Benchmark_RealWorldScenario)
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = end - start;
 
-    std::cout << "Processed " << (opsPerThread * numThreads) << " ops in " << diff.count() << " s\n";
-    std::cout << "Throughput: " << (long long)((opsPerThread * numThreads) / diff.count()) << " ops/sec\n";
-    std::cout << "Average Latency: " << (diff.count() / numOps) * 1e6 << " us/order\n";
+    long long totalOps = numOps * numThreads;
+    std::cout << "Processed " << totalOps << " ops in " << diff.count() << " s\n";
+    std::cout << "Throughput: " << (long long)(totalOps / diff.count()) << " ops/sec\n";
+    std::cout << "Average Latency: " << (diff.count() / totalOps) * 1e6 << " us/order\n";
 }

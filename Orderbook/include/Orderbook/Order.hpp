@@ -3,21 +3,17 @@
 #include <algorithm>
 #include <deque>
 #include <ostream>
+#include <memory>
 
 #include "../Constants.hpp"
-
-enum class OrderType
-{
-    FillAndKill,
-    GoodTillCancel,
-};
 
 class Order
 {
 public:
-    Order() : orderId_(0), orderType_(OrderType::GoodTillCancel), price_(0), initialQuantity_(0), remainingQuantity_(0), side_(Side::Buy) {}
+    Order() : orderId_(0), owner_(0), orderType_(OrderType::GoodTillCancel), price_(0), initialQuantity_(0), remainingQuantity_(0), side_(Side::Buy) {}
 
-    Order(const OrderId orderId, OrderType orderType, Price price, const Quantity quantity, const Side side) : orderId_(orderId),
+    Order(const OrderId orderId, uint32_t owner, OrderType orderType, Price price, const Quantity quantity, const Side side) : orderId_(orderId),
+                                                                                                               owner_(owner),
                                                                                                                orderType_(orderType),
                                                                                                                price_(price),
                                                                                                                initialQuantity_(quantity),
@@ -27,6 +23,7 @@ public:
     }
 
     // Getters and Setters
+    const uint32_t getOwner() const { return owner_; }
     const Price getPrice() const { return price_; }
     const Quantity getQuantity() const { return remainingQuantity_; }
     const Quantity getInitialQuantity() const { return initialQuantity_; }
@@ -44,6 +41,7 @@ public:
     friend std::ostream &operator<<(std::ostream &out, const Order &order);
 
 private:
+    uint32_t owner_;
     Price price_;
     OrderType orderType_;
     Quantity initialQuantity_;
@@ -59,5 +57,5 @@ struct OrderRequest
     Order order;
 };
 
-using OrderPointer = Order*;
+
 using OrderList = std::deque<OrderPointer>;
