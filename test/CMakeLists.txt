@@ -6,6 +6,7 @@ add_subdirectory(googletest)
 # Create the test executable
 add_executable(OrderBookTests
     OrderBookTests.cpp
+    TraderSimulationTests.cpp
 )
 
 # Link against GTest and the main project library
@@ -14,8 +15,6 @@ target_link_libraries(OrderBookTests
     gtest_main
     OrderBookLib
 )
-
-target_link_options(OrderBookTests PRIVATE -static)
 
 include(GoogleTest)
 gtest_discover_tests(OrderBookTests)

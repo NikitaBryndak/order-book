@@ -1,14 +1,13 @@
 #pragma once
-#include <algorithm>
 #include <atomic>
-#include <deque>
 #include <vector>
+#include <unordered_map>
 
 #include "Config.hpp"
 #include "Constants.hpp"
 #include "Orderbook/Orderbook.hpp"
 
-class TraderManager; // forward
+class TraderManager;  // forward
 
 class Trader {
  public:
@@ -17,7 +16,6 @@ class Trader {
         manager_(nullptr),
         isRunning_(true),
         cash_(cash),
-        protfolioSize_(cash),
         strategy_(st),
         ob_(ob) {}
 
@@ -29,7 +27,11 @@ class Trader {
 
   virtual void tick() = 0;
 
-  void onTrade(Trade& t) {
+  void setManager(TraderManager* m) { manager_ = m; }
+  void stop() { isRunning_ = false; }
+  bool isRunning() const { return isRunning_.load(); }
+
+  inline void onTrade(Trade& t) {
     if (t.bid->getOwner() == traderId_) {
       stock_ += t.qty;
       reservedCash_ -= t.ask->getPrice() * t.qty;
@@ -39,15 +41,12 @@ class Trader {
     }
   }
 
-  void setManager(TraderManager* m);
-  void stop();
-  bool isRunning() const;
-
  protected:
   // Convenience helpers for derived traders
   OrderId placeOrder(OrderType type, Price price, Quantity qty, Side side);
   void cancelOrder(OrderId id);
-  void modifyOrder(OrderId id, OrderType type, Price price, Quantity qty, Side side);
+  void modifyOrder(OrderId id, OrderType type, Price price, Quantity qty,
+                   Side side);
 
  protected:
   uint32_t traderId_;
@@ -59,9 +58,9 @@ class Trader {
   std::atomic<uint64_t> stock_{0};
   std::atomic<uint64_t> reservedStock_{0};
 
-  uint32_t protfolioSize_;
   Strategy strategy_;
   Orderbook& ob_;
 
-  std::deque<OrderId> orders_;
+  std::vector<OrderId> orders_;
+  std::unordered_map<OrderId, int> orderIndex_;
 };
