@@ -81,7 +81,7 @@ private:
 
 };
 
-/* ========  Inline UI-support implementations (pure C++, no Qt)  ============ */
+/* ========  Inline UI-support implementations  ============ */
 #ifdef OB_ENABLE_UI
 #include "Config.hpp"
 
@@ -99,9 +99,9 @@ inline void Orderbook::recordTradePrice(Price price, Quantity qty) {
   currentCandle_.volume     += qty;
   currentCandle_.tradeCount += 1;
 
-  if (currentCandle_.tradeCount >= (uint64_t)Config::candleTradesPerCandle) {
+  if (currentCandle_.tradeCount >= Config::candleTradesPerCandle) {
     candleHistory_.push_back(currentCandle_);
-    if ((int)candleHistory_.size() > Config::candleMaxCandles)
+    if (candleHistory_.size() > Config::candleMaxCandles)
       candleHistory_.pop_front();
     currentCandle_ = Candlestick{};
   }
@@ -114,7 +114,7 @@ inline void Orderbook::takeSnapshot() {
             [](auto& a, auto& b) { return a.first > b.first; });
 
   for (auto& [p, q] : askLevels_) snap.askLevels.push_back({p, q});
-  std::sort(snap.askLevels.begin(), snap.askLevels.end());
+  std::sort(snap.askLevels.begin(), snap.askLevels.end(), [](auto& a, auto& b) { return a.first > b.first; });
 
   snap.candles = candleHistory_;
   if (currentCandle_.isValid()) snap.candles.push_back(currentCandle_);

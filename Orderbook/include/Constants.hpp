@@ -18,8 +18,10 @@ using OrderId = uint64_t;
 
 enum struct Side { Buy, Sell };
 
+// TODO: FillOrKill
 enum class OrderType {
   FillAndKill,
+  FillOrKill,
   GoodTillCancel,
 };
 
@@ -60,8 +62,8 @@ struct Candlestick
 };
 
 struct OrderBookSnapshot {
-  std::vector<std::pair<Price, Quantity>> bidLevels;
-  std::vector<std::pair<Price, Quantity>> askLevels;
+  std::deque<std::pair<Price, Quantity>> bidLevels;
+  std::deque<std::pair<Price, Quantity>> askLevels;
   std::deque<Candlestick> candles;
   Price topBid{0};
   Price topAsk{0};

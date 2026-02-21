@@ -10,7 +10,7 @@ inline static constexpr int maxOrdersPerTrader =
 /* ------------------------------- NoiseTrader ------------------------------ */
 inline static constexpr int nPSpread = 40;  // NoiseTrader price spread
 inline static constexpr int nQSpread = 100;  // NoiseTrader quantity spread
-inline static constexpr int makerP = 0;  // NoiseTrader quantity spread
+inline static constexpr int makerP = 51;  // NoiseTrader quantity spread
 
 /* ------------------------------------ UI ----------------------------------- */
 inline static constexpr int candleTradesPerCandle = 200;
