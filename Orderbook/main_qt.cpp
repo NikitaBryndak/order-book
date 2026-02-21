@@ -1,18 +1,17 @@
-// main.cpp  –  Headless (non-Qt) entry point for the order-book simulation
-#include "Orderbook/Orderbook.hpp"
+// main_qt.cpp  –  Qt6 entry point for the order-book simulation
+#include "Orderbook/OrderbookUI.hpp"
 #include "Trader/TraderManager.hpp"
 #include "Trader/NoiseTrader.hpp"
 
-#include <chrono>
-#include <cstdio>
+#include <QApplication>
 #include <cstdlib>
 #include <limits>
 #include <memory>
-#include <thread>
 
 int main(int argc, char** argv) {
+  QApplication app(argc, argv);
+
   const int nTraders = (argc > 1) ? std::atoi(argv[1]) : 10;
-  const int nSeconds = (argc > 2) ? std::atoi(argv[2]) : 10;
 
   Orderbook ob(1 << 20, 0);
   TraderManager mgr(ob, 1000);
@@ -23,12 +22,13 @@ int main(int argc, char** argv) {
 
   mgr.start();
 
-  std::this_thread::sleep_for(std::chrono::seconds(nSeconds));
+  OrderBookWindow win(ob);
+  win.show();
+
+  int ret = app.exec();
 
   mgr.stop();
   mgr.join();
 
-  std::printf("Matched trades: %lu\n", ob.matchedTrades());
-
-  return 0;
+  return ret;
 }

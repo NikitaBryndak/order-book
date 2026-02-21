@@ -1,20 +1,14 @@
 #include "Orderbook/Orderbook.hpp"
 
-#include <pthread.h>
-#include <sched.h>
-
-#include <cstdlib>
-#include <iomanip>
-#include <iostream>
-#include <set>
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
 
-#include "Config.hpp"
-#include "Constants.hpp"
-#include "Orderbook/Order.hpp"
 #include "utils.hpp"
 
+
+/// @brief Orderbook matching function that uses map bid and ask levels to match orders
+/// @param newOrder `OrderPointer` that is inserted into the matching engine
 void Orderbook::matchOrders(OrderPointer newOrder) {
   if (newOrder->getSide() == Side::Buy) {
     while (true) {
@@ -208,90 +202,16 @@ void Orderbook::processLoop() {
         this->modifyOrder(request.order);
         break;
 
-      case (RequestType::Print):
-        this->printState();
+#ifdef OB_ENABLE_UI
+      case (RequestType::Snapshot):
+        this->takeSnapshot();
         break;
+#endif
 
       case (RequestType::Stop):
         return;
     }
   }
-}
-
-void Orderbook::printState() const {
-  system("clear");
-
-  int totalWidth = 8 + Config::barWidth + 3 + 9 + 3 + Config::barWidth + 8;
-  std::string title = "Real-Time Orderbook State";
-  int titlePadding = (totalWidth > (int)title.length())
-                         ? (totalWidth - title.length()) / 2
-                         : 0;
-  std::cout << std::string(titlePadding, ' ') << title << "\n";
-  std::cout << std::string(titlePadding, ' ')
-            << std::string(title.length(), '=') << "\n\n";
-
-  // Collect all unique prices
-  std::set<Price> allPrices;
-  Quantity maxQty = 0;
-  for (const auto& [price, q] : bidLevels_) {
-    allPrices.insert(price);
-    if (q > maxQty) maxQty = q;
-  }
-  for (const auto& [price, q] : askLevels_) {
-    allPrices.insert(price);
-    if (q > maxQty) maxQty = q;
-  }
-
-  // Header
-  auto center = [](std::string s, int w) {
-    int p = (w - s.length()) / 2;
-    return std::string(p, ' ') + s + std::string(w - p - s.length(), ' ');
-  };
-
-  std::cout << center("BidQty", 8) << center("Volume", Config::barWidth)
-            << " | " << center("Price", 9) << " | "
-            << center("Volume", Config::barWidth) << center("AskQty", 8)
-            << "\n";
-
-  std::cout << std::string(totalWidth, '-') << "\n";
-
-  for (auto it = allPrices.rbegin(); it != allPrices.rend(); ++it) {
-    Price price = *it;
-    Quantity bidQty = bidLevels_.count(price) ? bidLevels_.at(price) : 0;
-    Quantity askQty = askLevels_.count(price) ? askLevels_.at(price) : 0;
-
-    // Skip rows with no volume
-    if (bidQty == 0 && askQty == 0) continue;
-
-    // Create volume bars
-    int bidBarLength = maxQty > 0 ? (bidQty * Config::barWidth) / maxQty : 0;
-    int askBarLength = maxQty > 0 ? (askQty * Config::barWidth) / maxQty : 0;
-
-    // Bid: qty right-aligned in 6, then spaces + green bars (right-aligned)
-    std::string bidQtyStr = bidQty > 0 ? std::to_string(bidQty) : "";
-    std::string bidSpaces = std::string(Config::barWidth - bidBarLength, ' ');
-    std::string bidBars = std::string(bidBarLength, '#');
-
-    // Ask: red bars + spaces, then qty left-aligned in 6
-    std::string askBars = std::string(askBarLength, '#');
-    std::string askSpaces = std::string(Config::barWidth - askBarLength, ' ');
-    std::string askQtyStr = askQty > 0 ? std::to_string(askQty) : "";
-
-    // Price centered in 8
-    std::string priceStr = std::to_string(price);
-    int pricePadding = (9 - priceStr.length()) / 2;
-    std::string pricePadded =
-        std::string(pricePadding, ' ') + priceStr +
-        std::string(9 - pricePadding - priceStr.length(), ' ');
-
-    // Output the row
-    std::cout << std::left << std::setw(8) << bidQtyStr << bidSpaces << bidBars
-              << " | " << pricePadded << " | " << askBars << askSpaces
-              << std::left << std::setw(8) << askQtyStr << "\n";
-  }
-
-  std::cout << "\nTotal Resting Orders: " << size_ << "  Total Matches: " << matchedTrades_.load() << "\n";
-  std::cout << std::flush;
 }
 
 Price Orderbook::topBidPrice() const {
@@ -305,8 +225,11 @@ Price Orderbook::topAskPrice() const {
 }
 
 inline void Orderbook::onMatch(const OrderPointer& b, const OrderPointer& a, Quantity& qty) {
-  // increment matched-trades counter and notify listener
   matchedTrades_++;
+
+#ifdef OB_ENABLE_UI
+  recordTradePrice(a->getPrice(), qty);
+#endif
 
   if (listener_) [[likely]] {
     Trade t{b, a, qty};
@@ -314,16 +237,9 @@ inline void Orderbook::onMatch(const OrderPointer& b, const OrderPointer& a, Qua
   }
 }
 
-// inline void Orderbook::sendAck(OrderPointer& o) {
-//   if (ackListener_) [[likely]] {
-//     ackListener_(o);
-//   }
-// }
-
-Orderbook::Orderbook(size_t maxOrders, int coreId, bool verbose)
+Orderbook::Orderbook(size_t maxOrders, int coreId)
     : orderPool_(maxOrders),
-      buffer_(nextPowerOf2(maxOrders)),
-      verbose_(verbose) {
+      buffer_(nextPowerOf2(maxOrders)) {
   workerThread_ = std::thread(&Orderbook::processLoop, this);
 
   if (coreId >= 0) {
@@ -335,7 +251,7 @@ Orderbook::Orderbook(size_t maxOrders, int coreId, bool verbose)
                                     sizeof(cpu_set_t), &cpuset);
 
     if (rc != 0) {
-      std::cerr << "Error calling pthread_setaffinity_np: " << rc << "\n";
+      std::fprintf(stderr, "Error calling pthread_setaffinity_np: %d\n", rc);
     }
   }
 }

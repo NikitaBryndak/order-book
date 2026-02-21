@@ -1,5 +1,4 @@
 #pragma once
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <vector>
@@ -24,7 +23,7 @@ enum class OrderType {
   GoodTillCancel,
 };
 
-enum struct RequestType { Add, Cancel, Modify, Stop, Print };
+enum struct RequestType {Add, Cancel, Modify, Stop, Snapshot};
 
 struct Trade {
   OrderPointer bid;
@@ -38,6 +37,39 @@ enum struct AckType { Accepted, Rejected, Cancelled };
 
 using TradeListener = std::function<void(Trade&)>;
 using AckListener = std::function<void(OrderPointer&)>;
+
+/* -------------------------------------------------------------------------- */
+/*                          UI-only types (guarded)                           */
+/* -------------------------------------------------------------------------- */
+#ifdef OB_ENABLE_UI
+
+#include <deque>
+#include <utility>
+
+struct Candlestick
+{
+  Price open{0};
+  Price close{0};
+  Price low{0};
+  Price high{0};
+  uint64_t volume{0};
+  uint64_t tradeCount{0};
+
+  bool isBullish() const { return close >= open; }
+  bool isValid() const { return tradeCount > 0; }
+};
+
+struct OrderBookSnapshot {
+  std::vector<std::pair<Price, Quantity>> bidLevels;
+  std::vector<std::pair<Price, Quantity>> askLevels;
+  std::deque<Candlestick> candles;
+  Price topBid{0};
+  Price topAsk{0};
+  size_t orderCount{0};
+  uint64_t matchCount{0};
+};
+
+#endif  // OB_ENABLE_UI
 
 /* -------------------------------------------------------------------------- */
 /*                                   Trader                                   */

@@ -3,7 +3,6 @@
 #include <vector>
 #include <unordered_map>
 
-#include "Config.hpp"
 #include "Constants.hpp"
 #include "Orderbook/Orderbook.hpp"
 
@@ -24,12 +23,11 @@ class Trader {
   /* ----------------------------- Getters & Setters ------------------- */
   Strategy getStrategy() const { return strategy_; }
   uint32_t getId() const { return traderId_; }
+  void setManager(TraderManager* m) { manager_ = m; }
+  bool isRunning() const { return isRunning_.load(); }
+  void stop() { isRunning_ = false; }
 
   virtual void tick() = 0;
-
-  void setManager(TraderManager* m) { manager_ = m; }
-  void stop() { isRunning_ = false; }
-  bool isRunning() const { return isRunning_.load(); }
 
   inline void onTrade(Trade& t) {
     if (t.bid->getOwner() == traderId_) {

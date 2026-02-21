@@ -13,8 +13,8 @@ class TraderSimulationTest : public ::testing::Test {
   std::unique_ptr<TraderManager> mgr_;
 
   void SetUp() override {
-    ob_ = std::make_unique<Orderbook>(1 << 20, 0, false);
-    mgr_ = std::make_unique<TraderManager>(*ob_, /*sleepUs=*/100);
+    ob_ = std::make_unique<Orderbook>(1 << 20, 0);
+    mgr_ = std::make_unique<TraderManager>(*ob_, 100);
   }
 
   void TearDown() override {

@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <deque>
 #include <ostream>
-#include <memory>
 
 #include "../Constants.hpp"
 

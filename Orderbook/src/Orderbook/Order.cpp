@@ -1,4 +1,3 @@
-#include <ostream>
 #include "Orderbook/Order.hpp"
 
 std::ostream& operator<<(std::ostream &out, const Order &order)

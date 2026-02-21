@@ -1,8 +1,14 @@
 #pragma once
-#include <list>
+#include <atomic>
+#include <algorithm>
 #include <map>
 #include <unordered_map>
 #include <thread>
+
+#ifdef OB_ENABLE_UI
+#include <deque>
+#include <mutex>
+#endif
 
 #include "../Constants.hpp"
 #include "Order.hpp"
@@ -16,13 +22,20 @@ public:
     size_t size() const { return size_; };
     uint64_t matchedTrades() const { return matchedTrades_.load(); };
 
-    explicit Orderbook(size_t maxOrders, int coreId = -1, bool verbose = false);
+    explicit Orderbook(size_t maxOrders, int coreId = -1);
 
     Price topBidPrice() const;
     Price topAskPrice() const;
 
-    // void setAckListener(AckListener listener) { ackListener_ = listener; };
     void setTradeListener(TradeListener listener) { listener_ = listener; };
+
+#ifdef OB_ENABLE_UI
+    /// Thread-safe: returns the latest snapshot taken by the worker thread.
+    OrderBookSnapshot getSnapshot() const {
+        std::lock_guard<std::mutex> lock(snapshotMutex_);
+        return snapshot_;
+    }
+#endif
 
     ~Orderbook();
 
@@ -32,7 +45,6 @@ private:
     void modifyOrder(const Order& order);
     void matchOrders(OrderPointer newOrder);
 
-    // void sendAck(OrderPointer&);
     inline void onMatch(const OrderPointer& b, const OrderPointer& a, Quantity& qty);
 
     void processLoop();
@@ -50,13 +62,70 @@ private:
     std::unordered_map<OrderId, OrderPointer> orders_;
 
     size_t size_{0};
-    bool verbose_{false};
 
     TradeListener listener_;
-    // AckListener ackListener_;
 
     std::atomic<uint64_t> matchedTrades_{0};
 
-    void printState() const;
+#ifdef OB_ENABLE_UI
+    /* ------------------------------ Snapshot -------------------------------- */
+    mutable std::mutex snapshotMutex_;
+    OrderBookSnapshot snapshot_;
+
+    /* ------------------------------ Candle data ------------------------------ */
+    Candlestick currentCandle_;
+    std::deque<Candlestick> candleHistory_;
+    inline void recordTradePrice(Price price, Quantity qty);
+    void takeSnapshot();
+#endif
 
 };
+
+/* ========  Inline UI-support implementations (pure C++, no Qt)  ============ */
+#ifdef OB_ENABLE_UI
+#include "Config.hpp"
+
+inline void Orderbook::recordTradePrice(Price price, Quantity qty) {
+  if (!currentCandle_.isValid()) {
+    currentCandle_.open  = price;
+    currentCandle_.close = price;
+    currentCandle_.low   = price;
+    currentCandle_.high  = price;
+  }
+
+  currentCandle_.close = price;
+  if (price < currentCandle_.low)  currentCandle_.low  = price;
+  if (price > currentCandle_.high) currentCandle_.high = price;
+  currentCandle_.volume     += qty;
+  currentCandle_.tradeCount += 1;
+
+  if (currentCandle_.tradeCount >= (uint64_t)Config::candleTradesPerCandle) {
+    candleHistory_.push_back(currentCandle_);
+    if ((int)candleHistory_.size() > Config::candleMaxCandles)
+      candleHistory_.pop_front();
+    currentCandle_ = Candlestick{};
+  }
+}
+
+inline void Orderbook::takeSnapshot() {
+  OrderBookSnapshot snap;
+  for (auto& [p, q] : bidLevels_) snap.bidLevels.push_back({p, q});
+  std::sort(snap.bidLevels.begin(), snap.bidLevels.end(),
+            [](auto& a, auto& b) { return a.first > b.first; });
+
+  for (auto& [p, q] : askLevels_) snap.askLevels.push_back({p, q});
+  std::sort(snap.askLevels.begin(), snap.askLevels.end());
+
+  snap.candles = candleHistory_;
+  if (currentCandle_.isValid()) snap.candles.push_back(currentCandle_);
+  snap.topBid = topBidPrice();
+  snap.topAsk = topAskPrice();
+  snap.orderCount = size_;
+  snap.matchCount = matchedTrades_.load();
+
+  {
+    std::lock_guard<std::mutex> lock(snapshotMutex_);
+    snapshot_ = std::move(snap);
+  }
+}
+#endif  // OB_ENABLE_UI
